@@ -162,14 +162,16 @@ tasks.register('jpackageImage', Exec) {
     doFirst { commandLine buildJpackageArgs('app-image', project) }
 }
 
-// 2-B: 네이티브 인스톨러 (Windows EXE, macOS DMG, Linux DEB)
+// 2-B: 네이티브 인스톨러 (Windows MSI, macOS DMG, Linux DEB)
+// Windows: --type exe (Burn 부트스트래퍼)는 wixstdba.dll 이 바이너리 ZIP 에 없어서 불가.
+//          --type msi 는 동일한 WiX 바이너리로 정상 동작하며 더블클릭 설치·제거 지원.
 tasks.register('jpackageExe', Exec) {
     group       = 'distribution'
-    description = 'EXE/DMG/DEB 인스톨러를 생성합니다 (Windows: WiX 3.0+ 필요)'
+    description = 'MSI/DMG/DEB 인스톨러를 생성합니다 (Windows: WiX 3.0+ 필요)'
     dependsOn 'prepareJpackageInput'
     doFirst {
         def os   = org.gradle.internal.os.OperatingSystem.current()
-        def type = os.windows ? 'exe' : (os.macOsX ? 'dmg' : 'deb')
+        def type = os.windows ? 'msi' : (os.macOsX ? 'dmg' : 'deb')
         commandLine buildJpackageArgs(type, project)
     }
 }
@@ -197,7 +199,9 @@ List<String> buildJpackageArgs(String type, Project proj) {
         '--type',        type,
         '--input',       inputDir.absolutePath,
         '--dest',        outDir.absolutePath,
-        '--name',        'LLM Manager',
+        // WiX light.exe 는 앱 이름에 공백이 있으면 MSI 링크 단계(exit 311)에서 실패한다.
+        // --name 은 공백 없이 지정하고 표시 이름은 --description 으로 분리한다.
+        '--name',        'LLMManager',
         '--app-version', proj.version as String,
         '--main-jar',    mainJar,
         '--main-class',  'org.kyj.llmmanager.LlmManagerApp',
@@ -206,7 +210,7 @@ List<String> buildJpackageArgs(String type, Project proj) {
         '--java-options', "--add-modules ${javafxMods}",
         '--java-options', '-Xmx512m',
         '--java-options', '--add-opens java.base/java.lang=ALL-UNNAMED',
-        // '--icon', 'packaging/windows/LLM Manager.ico',  // 아이콘 지정 시 주석 해제
+        // '--icon', 'packaging/windows/LLMManager.ico',  // 아이콘 지정 시 주석 해제
     ]
 
     // app-image 는 인스톨러 전용 옵션을 지원하지 않으므로 제외
@@ -219,10 +223,10 @@ List<String> buildJpackageArgs(String type, Project proj) {
                 '--win-shortcut',
                 '--win-menu-group', 'LLM Manager',
                 '--vendor',         'Miracom Inc.',
-                '--description',    'LLM 서비스 관리 데스크톱 앱',
+                '--description',    'LLM Service Manager',
             ]
         } else if (os.macOsX) {
-            cmd += ['--mac-package-name', 'LLM Manager']
+            cmd += ['--mac-package-name', 'LLMManager']
         } else {
             cmd += [
                 '--linux-shortcut',
