@@ -77,10 +77,8 @@ try {
 Write-Step 3 3 "EXE → deploy\ 복사"
 
 $installerDir = Join-Path $ProjectRoot 'build\installer'
-# Windows: jpackageExe 는 MSI 를 생성하므로 *.msi 로 검색
-# macOS/Linux: *.dmg / *.deb
 $exeFile = Get-ChildItem -Path $installerDir -ErrorAction SilentlyContinue |
-           Where-Object { $_.Extension -in '.msi', '.exe', '.dmg', '.deb' } |
+           Where-Object { $_.Extension -in '.exe', '.msi', '.dmg', '.deb' } |
            Sort-Object LastWriteTime |
            Select-Object -Last 1
 

@@ -163,15 +163,14 @@ tasks.register('jpackageImage', Exec) {
 }
 
 // 2-B: 네이티브 인스톨러 (Windows MSI, macOS DMG, Linux DEB)
-// Windows: --type exe (Burn 부트스트래퍼)는 wixstdba.dll 이 바이너리 ZIP 에 없어서 불가.
-//          --type msi 는 동일한 WiX 바이너리로 정상 동작하며 더블클릭 설치·제거 지원.
+// 2-B: 네이티브 인스톨러 (Windows EXE, macOS DMG, Linux DEB)
 tasks.register('jpackageExe', Exec) {
     group       = 'distribution'
-    description = 'MSI/DMG/DEB 인스톨러를 생성합니다 (Windows: WiX 3.0+ 필요)'
+    description = 'EXE/DMG/DEB 인스톨러를 생성합니다 (Windows: WiX 3.0+ 필요)'
     dependsOn 'prepareJpackageInput'
     doFirst {
         def os   = org.gradle.internal.os.OperatingSystem.current()
-        def type = os.windows ? 'msi' : (os.macOsX ? 'dmg' : 'deb')
+        def type = os.windows ? 'exe' : (os.macOsX ? 'dmg' : 'deb')
         commandLine buildJpackageArgs(type, project)
     }
 }
