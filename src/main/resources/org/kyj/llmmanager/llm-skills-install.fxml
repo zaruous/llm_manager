@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="org.kyj.llmmanager.ui.controller.LlmSkillsInstallController">
+
+    <top>
+        <VBox style="-fx-padding: 16 20 12 20; -fx-spacing: 12;">
+            <Label text="LLM 스킬 &amp; 룰 자동 설치"
+                   style="-fx-font-size: 18px; -fx-font-weight: bold;"/>
+            <GridPane hgap="12" vgap="8">
+                <Label text="프로젝트 경로:" GridPane.columnIndex="0" GridPane.rowIndex="0"
+                       style="-fx-text-fill: #aaaaaa;"/>
+                <HBox spacing="8" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <TextField fx:id="projectPathField" prefWidth="380"
+                               promptText="C:\Users\user\my-project"/>
+                    <Button text="📁 찾아보기" onAction="#onBrowseProject"/>
+                </HBox>
+                <Label text="프로젝트명:" GridPane.columnIndex="0" GridPane.rowIndex="1"
+                       style="-fx-text-fill: #aaaaaa;"/>
+                <TextField fx:id="projectNameField" prefWidth="200"
+                           promptText="my-project" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                <Label text="언어:" GridPane.columnIndex="2" GridPane.rowIndex="1"
+                       style="-fx-text-fill: #aaaaaa;"/>
+                <ComboBox fx:id="languageCombo" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+                <Label text="작성자:" GridPane.columnIndex="4" GridPane.rowIndex="1"
+                       style="-fx-text-fill: #aaaaaa;"/>
+                <TextField fx:id="authorField" prefWidth="120"
+                           GridPane.columnIndex="5" GridPane.rowIndex="1"/>
+            </GridPane>
+            <Separator/>
+        </VBox>
+    </top>
+
+    <center>
+        <SplitPane dividerPositions="0.22, 0.45">
+
+            <!-- 왼쪽: 프로젝트 히스토리 -->
+            <VBox style="-fx-padding: 8; -fx-spacing: 6;">
+                <Label text="최근 프로젝트" style="-fx-font-weight: bold;"/>
+                <ListView fx:id="projectHistoryList" VBox.vgrow="ALWAYS"/>
+            </VBox>
+
+            <!-- 중간: 도구 선택 + 팩 선택 -->
+            <SplitPane orientation="VERTICAL" dividerPositions="0.45">
+                <VBox style="-fx-padding: 12; -fx-spacing: 8;">
+                    <Label text="설치할 LLM 도구" style="-fx-font-weight: bold;"/>
+                    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS">
+                        <VBox fx:id="toolsContainer" spacing="4" style="-fx-padding: 4;"/>
+                    </ScrollPane>
+                </VBox>
+                <VBox style="-fx-padding: 12; -fx-spacing: 8;">
+                    <Label text="스킬 팩 선택" style="-fx-font-weight: bold;"/>
+                    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS">
+                        <VBox fx:id="packsContainer" spacing="4" style="-fx-padding: 4;"/>
+                    </ScrollPane>
+                </VBox>
+            </SplitPane>
+
+            <!-- 오른쪽: 미리보기 -->
+            <VBox style="-fx-padding: 12; -fx-spacing: 8;">
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Label text="미리보기" style="-fx-font-weight: bold;"/>
+                    <Button text="↻ 갱신" onAction="#onRefreshPreview"/>
+                </HBox>
+                <TextArea fx:id="previewArea" VBox.vgrow="ALWAYS" editable="false"
+                          style="-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;"
+                          wrapText="true"/>
+            </VBox>
+
+        </SplitPane>
+    </center>
+
+    <bottom>
+        <HBox spacing="12" style="-fx-padding: 12 20;">
+            <Button fx:id="installBtn" text="✓ 설치" onAction="#onInstall"
+                    style="-fx-background-color: #336699; -fx-font-size: 13px; -fx-padding: 6 20;"/>
+            <Button fx:id="backupInstallBtn" text="📋 백업 후 설치" onAction="#onBackupInstall"
+                    style="-fx-font-size: 13px; -fx-padding: 6 20;"/>
+            <Label text="※ '백업 후 설치'는 기존 파일을 .llm-backup/ 에 저장합니다."
+                   style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+        </HBox>
+    </bottom>
+</BorderPane>

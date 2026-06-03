@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="org.kyj.llmmanager.ui.controller.LlmSkillsLoadController">
+
+    <top>
+        <VBox style="-fx-padding: 16 20 12 20; -fx-spacing: 12;">
+            <Label text="디렉토리에서 스킬 &amp; 룰 로드"
+                   style="-fx-font-size: 18px; -fx-font-weight: bold;"/>
+            <GridPane hgap="12" vgap="8">
+                <Label text="소스 디렉토리:" GridPane.columnIndex="0" GridPane.rowIndex="0"
+                       style="-fx-text-fill: #aaaaaa;"/>
+                <HBox spacing="8" GridPane.columnIndex="1" GridPane.rowIndex="0">
+                    <TextField fx:id="sourceDirField" prefWidth="360"
+                               promptText="스킬/룰 파일이 있는 디렉토리"/>
+                    <Button text="📁 찾아보기" onAction="#onBrowseSource"/>
+                    <Button text="🔍 스캔" onAction="#onScan"/>
+                </HBox>
+                <Label text="대상 프로젝트:" GridPane.columnIndex="0" GridPane.rowIndex="1"
+                       style="-fx-text-fill: #aaaaaa;"/>
+                <HBox spacing="8" GridPane.columnIndex="1" GridPane.rowIndex="1">
+                    <TextField fx:id="targetDirField" prefWidth="360"
+                               promptText="로드할 대상 프로젝트 디렉토리"/>
+                    <Button text="📁 찾아보기" onAction="#onBrowseTarget"/>
+                </HBox>
+            </GridPane>
+            <Separator/>
+        </VBox>
+    </top>
+
+    <center>
+        <SplitPane dividerPositions="0.4">
+
+            <!-- 왼쪽: 파일 목록 -->
+            <VBox style="-fx-padding: 8; -fx-spacing: 6;">
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Label text="발견된 파일" style="-fx-font-weight: bold;"/>
+                    <Button text="전체 선택" onAction="#onSelectAll"
+                            style="-fx-font-size: 11px; -fx-padding: 2 8;"/>
+                    <Button text="전체 해제" onAction="#onDeselectAll"
+                            style="-fx-font-size: 11px; -fx-padding: 2 8;"/>
+                    <Label fx:id="fileCountLabel"
+                           style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+                </HBox>
+                <ListView fx:id="fileListView" VBox.vgrow="ALWAYS"/>
+            </VBox>
+
+            <!-- 오른쪽: 파일 내용 미리보기 -->
+            <VBox style="-fx-padding: 12; -fx-spacing: 8;">
+                <Label text="파일 내용 미리보기" style="-fx-font-weight: bold;"/>
+                <TextArea fx:id="previewArea" VBox.vgrow="ALWAYS" editable="false"
+                          style="-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;"
+                          wrapText="true"/>
+            </VBox>
+
+        </SplitPane>
+    </center>
+
+    <bottom>
+        <HBox spacing="12" style="-fx-padding: 12 20;" alignment="CENTER_LEFT">
+            <Button fx:id="loadBtn" text="✓ 로드" onAction="#onLoad"
+                    style="-fx-background-color: #336699; -fx-font-size: 13px; -fx-padding: 6 20;"/>
+            <Label text="※ 선택한 파일을 대상 프로젝트에 복사합니다. 기존 파일은 덮어씁니다."
+                   style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+        </HBox>
+    </bottom>
+</BorderPane>
