@@ -22,11 +22,12 @@ $RELEASE_TAG  = 'wix3141rtm'
 $ZIP_NAME     = 'wix314-binaries.zip'
 $DOWNLOAD_URL = "https://github.com/wixtoolset/wix3/releases/download/$RELEASE_TAG/$ZIP_NAME"
 
-# 스크립트 위치 기준 상위 디렉토리(프로젝트 루트) 아래 deploy\WiX
-$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$DeployDir  = $ScriptDir                         # deploy\
-$WixDir     = Join-Path $DeployDir 'WiX'         # deploy\WiX\
-$ZipPath    = Join-Path $DeployDir "$ZIP_NAME"   # 임시 저장 위치
+# bin\ 기준 상위(프로젝트 루트) → deploy\WiX 에 설치
+$ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot = Split-Path -Parent $ScriptDir     # 프로젝트 루트
+$DeployDir   = Join-Path $ProjectRoot 'deploy'   # deploy\
+$WixDir      = Join-Path $DeployDir 'WiX'        # deploy\WiX\
+$ZipPath     = Join-Path $env:TEMP "$ZIP_NAME"   # 임시 저장 위치 (TEMP)
 # ────────────────────────────────────────────────────────────────────────────
 
 Write-Host ""
