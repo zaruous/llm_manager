@@ -164,3 +164,4 @@ FXML·CSS 변경 시 앱 재시작 없이 자동으로 화면이 갱신된다.
 
 - [아키텍처](docs/llm-manager/architecture.md) — 레이어 구조·컴포넌트·스레딩 모델
 - [패키징 가이드](docs/패키징.md) — 실행파일·설치파일 빌드 방법
+- [JavaFX vs Windows 데스크톱](docs/javafx-windows-comparison.md) — 기술 선택 시 장단점
