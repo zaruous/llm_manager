@@ -129,6 +129,112 @@ distributions {
     }
 }
 
+// ──────────────────────────────────────────────────────────────
+// 설치 패키지 (jpackage — JDK 17+ 내장)
+//
+// ./gradlew jpackageImage   → build/installer/  앱 이미지 폴더 (WiX 불필요, zip 배포 가능)
+// ./gradlew jpackageExe     → build/installer/  EXE/DMG/DEB 인스톨러
+//
+// ※ Windows EXE/MSI 생성 시 WiX Toolset 3.0+ 이 필요합니다.
+//    https://github.com/wixtoolset/wix3/releases/tag/wix3141rtm
+//
+// ※ 앱 아이콘을 변경하려면 아래 경로에 파일을 추가하고 --icon 옵션을 주석 해제하세요.
+//    Windows : packaging/windows/LLM Manager.ico
+//    macOS   : packaging/macos/LLM Manager.icns
+//    Linux   : packaging/linux/LLM Manager.png
+// ──────────────────────────────────────────────────────────────
+
+// 1단계: installDist 결과물(JARs + lib/def/)을 jpackage 입력 디렉토리로 복사
+tasks.register('prepareJpackageInput', Copy) {
+    group       = 'distribution'
+    description = 'jpackage 입력 디렉토리를 준비합니다 (JARs + def/)'
+    dependsOn installDist
+    // build/install/<name>/lib/ 에는 이미 JARs 와 def/ 서브폴더가 있다
+    from layout.buildDirectory.dir("install/${project.name}/lib")
+    into layout.buildDirectory.dir('jpackage-input')
+}
+
+// 2-A: app-image (폴더 구조) — WiX 없이 빌드 가능, zip 으로 배포
+tasks.register('jpackageImage', Exec) {
+    group       = 'distribution'
+    description = '앱 이미지(폴더)를 생성합니다 — WiX 없이 zip 배포 가능'
+    dependsOn 'prepareJpackageInput'
+    doFirst { commandLine buildJpackageArgs('app-image', project) }
+}
+
+// 2-B: 네이티브 인스톨러 (Windows EXE, macOS DMG, Linux DEB)
+tasks.register('jpackageExe', Exec) {
+    group       = 'distribution'
+    description = 'EXE/DMG/DEB 인스톨러를 생성합니다 (Windows: WiX 3.0+ 필요)'
+    dependsOn 'prepareJpackageInput'
+    doFirst {
+        def os   = org.gradle.internal.os.OperatingSystem.current()
+        def type = os.windows ? 'exe' : (os.macOsX ? 'dmg' : 'deb')
+        commandLine buildJpackageArgs(type, project)
+    }
+}
+
+/**
+ * jpackage 커맨드 인수 목록을 조립해 반환한다.
+ * BuiltinServiceLoader 가 JAR 위치 기준 def/ 를 탐색하므로,
+ * installDist 의 lib/ 구조(JAR 와 def/ 가 같은 레벨)를 그대로 사용한다.
+ *
+ * @param type  jpackage --type 값 (app-image / exe / msi / dmg / deb)
+ * @param proj  현재 Gradle Project 객체
+ * @return      jpackage 실행 인수 리스트
+ */
+List<String> buildJpackageArgs(String type, Project proj) {
+    def outDir   = proj.layout.buildDirectory.dir('installer').get().asFile
+    def inputDir = proj.layout.buildDirectory.dir('jpackage-input').get().asFile
+    outDir.mkdirs()
+
+    def mainJar    = "${proj.name}-${proj.version}.jar"
+    // JavaFX 모듈 목록 — 런타임에 $APPDIR(앱 설치 경로) 에서 로드
+    def javafxMods = 'javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base'
+
+    def cmd = [
+        'jpackage',
+        '--type',        type,
+        '--input',       inputDir.absolutePath,
+        '--dest',        outDir.absolutePath,
+        '--name',        'LLM Manager',
+        '--app-version', proj.version as String,
+        '--main-jar',    mainJar,
+        '--main-class',  'org.kyj.llmmanager.LlmManagerApp',
+        // $APPDIR: jpackage 런타임 매크로 → 설치된 app/ 디렉토리로 치환됨
+        '--java-options', '--module-path $APPDIR',
+        '--java-options', "--add-modules ${javafxMods}",
+        '--java-options', '-Xmx512m',
+        '--java-options', '--add-opens java.base/java.lang=ALL-UNNAMED',
+        // '--icon', 'packaging/windows/LLM Manager.ico',  // 아이콘 지정 시 주석 해제
+    ]
+
+    // app-image 는 인스톨러 전용 옵션을 지원하지 않으므로 제외
+    if (type != 'app-image') {
+        def os = org.gradle.internal.os.OperatingSystem.current()
+        if (os.windows) {
+            cmd += [
+                '--win-dir-chooser',
+                '--win-menu',
+                '--win-shortcut',
+                '--win-menu-group', 'LLM Manager',
+                '--vendor',         'Miracom Inc.',
+                '--description',    'LLM 서비스 관리 데스크톱 앱',
+            ]
+        } else if (os.macOsX) {
+            cmd += ['--mac-package-name', 'LLM Manager']
+        } else {
+            cmd += [
+                '--linux-shortcut',
+                '--linux-menu-group', 'LLM Manager',
+                '--vendor',           'Miracom Inc.',
+            ]
+        }
+    }
+    return cmd
+}
+
+// ──────────────────────────────────────────────────────────────
 // 독립 실행 fat JAR (gradle fatJar 로 빌드)
 tasks.register('fatJar', Jar) {
     group = 'build'
