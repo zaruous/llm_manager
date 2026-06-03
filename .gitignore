@@ -20,6 +20,9 @@ lib/hotswap/
 # 번들 JAR — 100MB 초과로 Git LFS 없이 GitHub 업로드 불가
 lib/*.jar
 
+# WiX Toolset 바이너리 (Download-WiX.ps1 로 다운로드)
+deploy/WiX/
+
 # 런타임 생성 파일
 docs/schema/
 
