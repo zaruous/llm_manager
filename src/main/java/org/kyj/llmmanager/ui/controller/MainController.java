@@ -1,0 +1,1155 @@
+/*
+ * 작성자 : kyj
+ * 작성일 : 2026-06-03
+ */
+package org.kyj.llmmanager.ui.controller;
+
+import org.kyj.llmmanager.AppContext;
+import org.kyj.llmmanager.model.*;
+import org.kyj.llmmanager.service.InstallationService;
+import org.kyj.llmmanager.service.SystemMonitorService;
+import org.kyj.llmmanager.ui.cell.ServiceListCell;
+import org.kyj.llmmanager.ui.dialog.ServiceDetailDialog;
+import org.kyj.llmmanager.util.SceneFactory;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
+import javafx.util.Duration;
+import org.kyj.llmmanager.ui.dialog.AddServiceDialog;
+import org.kyj.llmmanager.ui.dialog.HelpDialog;
+import org.kyj.llmmanager.ui.dialog.SettingsDialog;
+import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
+import javafx.collections.ObservableList;
+import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
+import javafx.fxml.Initializable;
+import javafx.geometry.Insets;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
+import javafx.stage.FileChooser;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
+
+import java.io.File;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.ResourceBundle;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * 메인 화면 컨트롤러.
+ * 서비스 목록 표시, 서비스 선택 시 상세 정보(개요/로그/설정/설치) 표시,
+ * 서비스 시작·중지·재시작·추가·삭제를 처리한다.
+ */
+public class MainController implements Initializable {
+
+    // ---- Menu bar ----
+    /** 메뉴바 (Stage 참조 획득에 사용) */
+    @FXML private MenuBar menuBar;
+
+    // ---- Left panel ----
+    /** 좌측 패널: 검색 필드 */
+    @FXML private TextField searchField;
+    /** 좌측 패널: 서비스 목록 */
+    @FXML private ListView<ServiceInstance> serviceListView;
+
+    // ---- Detail header ----
+    /** 선택된 서비스의 상태 요약 헤더 - 상태 색상 점 */
+    @FXML private Circle detailStatusDot;
+    /** 선택된 서비스의 상태 요약 헤더 - 서비스 이름 */
+    @FXML private Label detailNameLabel;
+    /** 선택된 서비스의 상태 요약 헤더 - 상태 텍스트 */
+    @FXML private Label detailStatusLabel;
+
+    // ---- Overview tab ----
+    /** 개요 탭: PID 표시 */
+    @FXML private Label pidLabel;
+    /** 개요 탭: 포트 표시 */
+    @FXML private Label portLabel;
+    /** 개요 탭: 업타임 표시 */
+    @FXML private Label uptimeLabel;
+    /** 서비스 시작 버튼 */
+    @FXML private Button startBtn;
+    /** 서비스 중지 버튼 */
+    @FXML private Button stopBtn;
+    /** 서비스 재시작 버튼 */
+    @FXML private Button restartBtn;
+
+    // ---- Logs tab ----
+    /** 로그 탭: 로그 출력 영역 */
+    @FXML private TextArea logArea;
+    /** 로그 탭: 자동 스크롤 체크박스 */
+    @FXML private CheckBox autoScrollCheck;
+    /** 로그 탭: 로그 필터 입력 필드 */
+    @FXML private TextField filterField;
+
+    // ---- Config tab ----
+    /** 설정 탭: 실행 인수 입력 영역 */
+    @FXML private VBox argsContainer;
+    /** 설정 탭: 환경변수 입력 영역 */
+    @FXML private VBox envVarsContainer;
+
+    // ---- Install tab ----
+    /** 설치 탭: 설치 경로 표시 레이블 */
+    @FXML private Label installDirLabel;
+    /** 설치 탭: 작업 경로 표시 레이블 */
+    @FXML private Label workingDirLabel;
+    /** 설치 탭: 설치 로그 출력 영역 */
+    @FXML private TextArea installLogArea;
+    /** 설치 탭: 진행률 표시 바 */
+    @FXML private ProgressBar progressBar;
+    /** 설치 탭: 설치 버튼 */
+    @FXML private Button installBtn;
+    /** 설치 탭: 제거 버튼 */
+    @FXML private Button uninstallBtn;
+
+    // ---- Status bar ----
+    /** 하단 상태 바 (전체/실행 중 서비스 수) */
+    @FXML private Label statusBarLabel;
+
+    // ---- Dashboard (홈 뷰) ----
+    /** 서비스 상세 헤더 HBox. 서비스 미선택 시 숨김. */
+    @FXML private HBox         detailHeader;
+
+    // ---- 시스템 리소스 패널 ----
+    /** CPU 사용률 게이지 */
+    @FXML private ProgressBar cpuBar;
+    /** 물리 메모리 사용률 게이지 */
+    @FXML private ProgressBar memBar;
+    /** JVM 힙 사용률 게이지 */
+    @FXML private ProgressBar jvmBar;
+    /** CPU 수치 레이블 */
+    @FXML private Label cpuLabel;
+    /** 물리 메모리 수치 레이블 */
+    @FXML private Label memLabel;
+    /** JVM 힙 수치 레이블 */
+    @FXML private Label jvmLabel;
+    /** 2초 간격 시스템 리소스 UI 갱신 타이머 */
+    private Timeline systemStatsTimer;
+    /** 대시보드 뷰 컨테이너. 서비스 미선택 시 기본으로 표시. */
+    @FXML private BorderPane dashboardPane;
+    /** 서비스 카드를 배치하는 FlowPane */
+    @FXML private FlowPane dashboardCardPane;
+    /** 대시보드 요약 - 전체 서비스 수 */
+    @FXML private Label dashTotalLabel;
+    /** 대시보드 요약 - 실행 중 서비스 수 */
+    @FXML private Label dashRunningLabel;
+    /** 대시보드 요약 - 오류 서비스 수 (오류 없으면 숨김) */
+    @FXML private Label dashErrorLabel;
+    /** 서비스 상세 탭패인. 서비스 선택 시 표시. */
+    @FXML private TabPane detailTabPane;
+
+    // ---- State ----
+    /** 앱 전역 컨텍스트 */
+    private AppContext ctx;
+    /** ListView에 바인딩된 서비스 인스턴스 Observable 목록 */
+    private final ObservableList<ServiceInstance> instanceList = FXCollections.observableArrayList();
+    /** 현재 선택된 서비스 인스턴스 */
+    private ServiceInstance selectedInstance;
+    /**
+     * 선택 서비스의 로그 추가 이벤트를 감지하는 리스너.
+     * 선택 변경 시 이전 리스너를 반드시 해제한다.
+     */
+    private ListChangeListener<LogEntry> logListener;
+    /** 설정 탭의 인수 이름 → 입력 컨트롤 맵 */
+    private final Map<String, Control> argControls = new HashMap<>();
+    /** 1초 간격으로 업타임 레이블을 갱신하는 스케줄러 */
+    private ScheduledExecutorService uptimeScheduler;
+
+    @Override
+    public void initialize(URL location, ResourceBundle resources) {
+        serviceListView.setItems(instanceList);
+        serviceListView.setCellFactory(lv -> new ServiceListCell());
+
+        serviceListView.getSelectionModel().selectedItemProperty().addListener(
+                (obs, old, selected) -> onServiceSelected(selected));
+
+        // 더블클릭: 서비스 상세 팝업 표시
+        serviceListView.setOnMouseClicked(event -> {
+            if (event.getClickCount() == 2
+                    && event.getButton() == javafx.scene.input.MouseButton.PRIMARY) {
+                ServiceInstance sel = serviceListView.getSelectionModel().getSelectedItem();
+                if (sel != null) openDetailDialog(sel);
+            }
+        });
+
+        // Search filter
+        searchField.textProperty().addListener((obs, old, val) -> filterList(val));
+
+        // Uptime timer
+        uptimeScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "uptime-timer");
+            t.setDaemon(true);
+            return t;
+        });
+        uptimeScheduler.scheduleAtFixedRate(() -> {
+            if (selectedInstance != null
+                    && selectedInstance.getStatus() == ServiceStatus.RUNNING) {
+                Platform.runLater(() -> {
+                    if (uptimeLabel != null)
+                        uptimeLabel.setText(selectedInstance.getUptimeString());
+                });
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+    }
+
+    /**
+     * AppContext를 주입하고 서비스 목록을 로드한다. FXML initialize() 이후 호출.
+     *
+     * @param ctx 주입할 앱 전역 컨텍스트
+     */
+    public void initializeContext(AppContext ctx) {
+        this.ctx = ctx;
+        loadServices();
+        showDashboard();
+
+        // 시스템 리소스 UI 타이머 — 2초마다 최신 수집값을 화면에 반영
+        systemStatsTimer = new Timeline(
+                new KeyFrame(Duration.seconds(2), e -> updateSystemStats()));
+        systemStatsTimer.setCycleCount(Timeline.INDEFINITE);
+        systemStatsTimer.play();
+        updateSystemStats();  // 즉시 초기 표시
+    }
+
+    /**
+     * ServiceRegistry에서 서비스를 읽어 instanceList를 갱신한다.
+     */
+    private void loadServices() {
+        instanceList.clear();
+        for (ServiceDefinition def : ctx.getServiceRegistry().getAll()) {
+            ServiceInstance inst = ctx.getProcessManager().getOrCreate(def);
+            if (ctx.getInstallationService().isInstalled(def)
+                    && inst.getStatus() == ServiceStatus.NOT_INSTALLED) {
+                inst.setStatus(ServiceStatus.INSTALLED);
+            }
+            instanceList.add(inst);
+        }
+        updateStatusBar();
+    }
+
+    /**
+     * 검색어로 서비스 목록을 필터링한다.
+     *
+     * @param query 검색어 (null 또는 빈 문자열이면 전체 표시)
+     */
+    private void filterList(String query) {
+        // Re-populate with filtered items
+        List<ServiceInstance> all = new ArrayList<>();
+        for (ServiceDefinition def : ctx.getServiceRegistry().getAll()) {
+            ServiceInstance inst = ctx.getProcessManager().getOrCreate(def);
+            all.add(inst);
+        }
+        instanceList.clear();
+        if (query == null || query.isBlank()) {
+            instanceList.addAll(all);
+        } else {
+            String q = query.toLowerCase();
+            for (ServiceInstance inst : all) {
+                if (inst.getDefinition().getName().toLowerCase().contains(q)) {
+                    instanceList.add(inst);
+                }
+            }
+        }
+    }
+
+    // =========================================================
+    // Service selection
+    // =========================================================
+
+    /**
+     * 서비스 선택 시 이전 로그 리스너를 해제하고 새 서비스 정보를 상세 패널에 표시한다.
+     *
+     * @param instance 새로 선택된 ServiceInstance
+     */
+    private void onServiceSelected(ServiceInstance instance) {
+        if (instance == null) return;
+
+        // Detach old listener
+        if (selectedInstance != null && logListener != null) {
+            selectedInstance.getLogs().removeListener(logListener);
+        }
+
+        selectedInstance = instance;
+        showDetail();  // 서비스 선택 시 상세 뷰로 전환
+
+        // Status listener
+        instance.statusProperty().addListener((obs, old, newVal) -> refreshDetail());
+        refreshDetail();
+        refreshLogs();
+        refreshConfig();
+        refreshInstall();
+    }
+
+    /**
+     * 선택 서비스의 상태·PID·포트·업타임을 헤더와 개요 탭에 갱신한다.
+     */
+    private void refreshDetail() {
+        if (selectedInstance == null) return;
+        ServiceDefinition def = selectedInstance.getDefinition();
+        ServiceStatus status = selectedInstance.getStatus();
+
+        detailNameLabel.setText(def.getName());
+        detailStatusLabel.setText(status.getLabel());
+        try {
+            detailStatusDot.setFill(Color.web(status.getColor()));
+        } catch (Exception ignored) {}
+
+        pidLabel.setText(selectedInstance.getPid() > 0
+                ? String.valueOf(selectedInstance.getPid()) : "-");
+        portLabel.setText(def.getPort() != null ? String.valueOf(def.getPort()) : "-");
+        uptimeLabel.setText(selectedInstance.getUptimeString());
+
+        boolean running = status == ServiceStatus.RUNNING;
+        boolean canStart = status == ServiceStatus.STOPPED
+                || status == ServiceStatus.INSTALLED
+                || status == ServiceStatus.ERROR;
+
+        startBtn.setDisable(!canStart);
+        stopBtn.setDisable(!running);
+        restartBtn.setDisable(!running);
+        updateStatusBar();
+    }
+
+    // =========================================================
+    // Overview tab actions
+    // =========================================================
+
+    @FXML
+    private void onStart() {
+        if (selectedInstance == null) return;
+        ctx.getProcessManager().start(selectedInstance);
+    }
+
+    @FXML
+    private void onStop() {
+        if (selectedInstance == null) return;
+        ctx.getProcessManager().stop(selectedInstance);
+    }
+
+    @FXML
+    private void onRestart() {
+        if (selectedInstance == null) return;
+        ctx.getProcessManager().restart(selectedInstance);
+    }
+
+    // =========================================================
+    // Logs tab
+    // =========================================================
+
+    private void refreshLogs() {
+        if (selectedInstance == null) return;
+        logArea.clear();
+        for (LogEntry entry : selectedInstance.getLogs()) {
+            appendLogEntry(entry);
+        }
+
+        logListener = change -> {
+            while (change.next()) {
+                if (change.wasAdded()) {
+                    change.getAddedSubList().forEach(this::appendLogEntry);
+                }
+            }
+        };
+        selectedInstance.getLogs().addListener(logListener);
+    }
+
+    private void appendLogEntry(LogEntry entry) {
+        String filter = filterField.getText();
+        if (filter != null && !filter.isBlank()
+                && !entry.getMessage().contains(filter)) return;
+        logArea.appendText("[" + entry.getTimeString() + "] " + entry.getMessage() + "\n");
+        if (autoScrollCheck.isSelected()) {
+            logArea.setScrollTop(Double.MAX_VALUE);
+        }
+    }
+
+    @FXML
+    private void onClear() {
+        logArea.clear();
+    }
+
+    @FXML
+    private void onFilter() {
+        if (selectedInstance == null) return;
+        logArea.clear();
+        selectedInstance.getLogs().forEach(this::appendLogEntry);
+    }
+
+    // =========================================================
+    // Config tab
+    // =========================================================
+
+    private void refreshConfig() {
+        if (selectedInstance == null) return;
+        ServiceDefinition def = selectedInstance.getDefinition();
+        buildArgForm(def);
+        buildEnvForm(def);
+    }
+
+    /**
+     * ArgSpec 목록을 기반으로 타입별 입력 컨트롤(TextField/CheckBox/ComboBox)을 설정 탭에 동적으로 생성한다.
+     *
+     * @param def 인수 명세를 포함하는 ServiceDefinition
+     */
+    private void buildArgForm(ServiceDefinition def) {
+        argsContainer.getChildren().clear();
+        argControls.clear();
+
+        for (ArgSpec spec : def.getArgSpecs()) {
+            HBox row = new HBox(10);
+            row.setPadding(new Insets(4, 0, 4, 0));
+            Label label = new Label(spec.getName() + ":");
+            label.setMinWidth(120);
+            label.setStyle("-fx-text-fill: #aaaaaa;");
+
+            String currentVal = def.getArgValues().getOrDefault(
+                    spec.getName(), spec.getDefaultValue());
+
+            Control control;
+            if ("BOOLEAN".equals(spec.getType())) {
+                CheckBox cb = new CheckBox();
+                cb.setSelected("true".equalsIgnoreCase(currentVal));
+                control = cb;
+            } else if ("SELECT".equals(spec.getType()) && spec.getOptions() != null) {
+                ComboBox<String> combo = new ComboBox<>();
+                combo.getItems().addAll(spec.getOptions());
+                combo.setValue(currentVal);
+                combo.setPrefWidth(200);
+                control = combo;
+            } else {
+                TextField tf = new TextField(currentVal != null ? currentVal : "");
+                tf.setPrefWidth(200);
+                if (spec.getDefaultValue() != null)
+                    tf.setPromptText(spec.getDefaultValue());
+                control = tf;
+            }
+
+            argControls.put(spec.getName(), control);
+            row.getChildren().addAll(label, control);
+
+            if (spec.getDescription() != null) {
+                Label desc = new Label(spec.getDescription());
+                desc.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
+                row.getChildren().add(desc);
+            }
+
+            argsContainer.getChildren().add(row);
+        }
+    }
+
+    /**
+     * 환경변수 맵을 키=값 행으로 설정 탭에 표시한다.
+     *
+     * @param def 환경변수 맵을 포함하는 ServiceDefinition
+     */
+    private void buildEnvForm(ServiceDefinition def) {
+        envVarsContainer.getChildren().clear();
+        for (Map.Entry<String, String> entry : def.getEnvVars().entrySet()) {
+            addEnvRow(entry.getKey(), entry.getValue());
+        }
+    }
+
+    private void addEnvRow(String key, String value) {
+        HBox row = new HBox(8);
+        row.setPadding(new Insets(2, 0, 2, 0));
+        TextField keyField = new TextField(key);
+        keyField.setPrefWidth(150);
+        TextField valField = new TextField(value);
+        valField.setPrefWidth(250);
+        Button removeBtn = new Button("X");
+        removeBtn.setOnAction(e -> envVarsContainer.getChildren().remove(row));
+        row.getChildren().addAll(keyField, new Label("="), valField, removeBtn);
+        envVarsContainer.getChildren().add(row);
+    }
+
+    @FXML
+    private void onAddEnvVar() {
+        addEnvRow("", "");
+    }
+
+    /**
+     * 설정 탭의 인수 값과 환경변수를 ServiceDefinition에 저장하고 파일에 기록한다.
+     */
+    @FXML
+    @SuppressWarnings("unchecked")
+    private void onSaveConfig() {
+        if (selectedInstance == null) return;
+        ServiceDefinition def = selectedInstance.getDefinition();
+
+        // Save arg values
+        for (Map.Entry<String, Control> entry : argControls.entrySet()) {
+            String name = entry.getKey();
+            Control ctrl = entry.getValue();
+            String value;
+            if (ctrl instanceof CheckBox cb) {
+                value = String.valueOf(cb.isSelected());
+            } else if (ctrl instanceof ComboBox<?> combo) {
+                value = combo.getValue() != null ? combo.getValue().toString() : "";
+            } else {
+                value = ((TextField) ctrl).getText();
+            }
+            def.getArgValues().put(name, value);
+        }
+
+        // Save env vars
+        Map<String, String> envVars = new HashMap<>();
+        for (var node : envVarsContainer.getChildren()) {
+            if (node instanceof HBox row) {
+                if (row.getChildren().size() >= 3) {
+                    TextField keyField = (TextField) row.getChildren().get(0);
+                    TextField valField = (TextField) row.getChildren().get(2);
+                    if (!keyField.getText().isBlank()) {
+                        envVars.put(keyField.getText(), valField.getText());
+                    }
+                }
+            }
+        }
+        def.getEnvVars().clear();
+        def.getEnvVars().putAll(envVars);
+
+        ctx.getServiceRegistry().update(def);
+        showInfo("설정이 저장되었습니다.");
+    }
+
+    // =========================================================
+    // Install tab
+    // =========================================================
+
+    private void refreshInstall() {
+        if (selectedInstance == null) return;
+        ServiceDefinition def = selectedInstance.getDefinition();
+
+        installDirLabel.setText(def.getInstallDir() != null ? def.getInstallDir() : "-");
+        workingDirLabel.setText(def.getWorkingDir() != null ? def.getWorkingDir() : "-");
+
+        installLogArea.clear();
+        progressBar.setProgress(0);
+        boolean installed = ctx.getInstallationService().isInstalled(def);
+        installBtn.setDisable(installed);
+        uninstallBtn.setDisable(!installed);
+    }
+
+    @FXML
+    private void onInstall() {
+        if (selectedInstance == null) return;
+        ServiceDefinition def = selectedInstance.getDefinition();
+
+        // repoUrl 없는 JAVA 서비스 → JAR 파일 직접 선택/복사 플로우
+        boolean isJarOnly = def.getRuntimeType() == RuntimeType.JAVA
+                && (def.getRepoUrl() == null || def.getRepoUrl().isBlank());
+        if (isJarOnly) {
+            handleJarInstall(def);
+            return;
+        }
+
+        // 일반 플로우: git clone + installCommands
+        installLogArea.clear();
+        progressBar.setProgress(-1);
+        installBtn.setDisable(true);
+
+        ctx.getInstallationService().install(def, selectedInstance,
+                new InstallationService.ProgressCallback() {
+                    @Override public void onLog(String message) {
+                        Platform.runLater(() -> installLogArea.appendText(message + "\n"));
+                    }
+                    @Override public void onDone(boolean success) {
+                        Platform.runLater(() -> {
+                            progressBar.setProgress(success ? 1.0 : 0);
+                            installBtn.setDisable(success);
+                            uninstallBtn.setDisable(!success);
+                            if (success && selectedInstance != null)
+                                selectedInstance.setStatus(ServiceStatus.INSTALLED);
+                        });
+                    }
+                });
+    }
+
+    /**
+     * repoUrl 없는 JAVA 서비스 전용 설치 플로우.
+     * lib/ 폴더에 번들된 JAR이 있으면 자동 복사하고, 없으면 파일 선택 다이얼로그를 연다.
+     *
+     * <ul>
+     *   <li>installDir 미설정 → 오류 안내</li>
+     *   <li>JAR 이미 존재 → "이미 설치됨" 안내</li>
+     *   <li>lib/ 번들 JAR 발견 → 자동 복사 (파일 선택 불필요)</li>
+     *   <li>번들 JAR 없음 → 파일 선택 → installDir 생성 → 복사</li>
+     * </ul>
+     *
+     * @param def 설치할 서비스 정의
+     */
+    private void handleJarInstall(ServiceDefinition def) {
+        if (def.getInstallDir() == null || def.getInstallDir().isBlank()) {
+            installLogArea.appendText("오류: 설치 경로가 설정되지 않았습니다.\n"
+                    + "서비스 수정(더블클릭 → 수정)에서 설치 경로를 지정해 주세요.\n");
+            return;
+        }
+
+        Path installDir = Path.of(def.getInstallDir());
+
+        // 이미 설치된 경우
+        if (ctx.getInstallationService().isInstalled(def)) {
+            installLogArea.clear();
+            installLogArea.appendText("이미 설치되어 있습니다.\n경로: " + installDir + "\n");
+            installBtn.setDisable(true);
+            uninstallBtn.setDisable(false);
+            return;
+        }
+
+        // lib/ 폴더에 번들 JAR 탐색 → 있으면 파일 선택 없이 바로 복사
+        File sourceJar = findBundledJar(def);
+        if (sourceJar == null) {
+            // 번들 JAR 없음: 파일 선택 다이얼로그
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("설치할 JAR 파일 선택");
+            chooser.getExtensionFilters().add(
+                    new FileChooser.ExtensionFilter("JAR 파일", "*.jar"));
+            File initDir = installDir.toFile().exists()
+                    ? installDir.toFile()
+                    : new File(System.getProperty("user.home"));
+            chooser.setInitialDirectory(initDir);
+            sourceJar = chooser.showOpenDialog((Stage) menuBar.getScene().getWindow());
+            if (sourceJar == null) return;   // 취소
+        }
+
+        final File jar = sourceJar;
+        installLogArea.clear();
+        progressBar.setProgress(-1);
+        installBtn.setDisable(true);
+
+        new Thread(() -> {
+            try {
+                // installDir 없으면 생성
+                if (!installDir.toFile().exists()) {
+                    Files.createDirectories(installDir);
+                    Platform.runLater(() -> installLogArea.appendText(
+                            "디렉토리 생성: " + installDir + "\n"));
+                }
+
+                // JAR 복사
+                Path dest = installDir.resolve(jar.getName());
+                Platform.runLater(() -> installLogArea.appendText(
+                        "복사 중: " + jar.getAbsolutePath() + "\n"
+                        + "   →  " + dest + "\n"));
+                Files.copy(jar.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
+
+                Platform.runLater(() -> {
+                    installLogArea.appendText("설치 완료.\n");
+                    progressBar.setProgress(1.0);
+                    installBtn.setDisable(true);
+                    uninstallBtn.setDisable(false);
+                    if (selectedInstance != null)
+                        selectedInstance.setStatus(ServiceStatus.INSTALLED);
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    installLogArea.appendText("오류: " + e.getMessage() + "\n");
+                    progressBar.setProgress(0);
+                    installBtn.setDisable(false);
+                });
+            }
+        }, "jar-install-" + def.getName()).start();
+    }
+
+    /**
+     * 서비스의 startCommand에서 JAR 파일명을 추출해 lib/ 폴더에서 파일을 탐색한다.
+     * 개발 환경({@code ./gradlew run})과 배포 환경 모두 CWD 기준 lib/ 폴더를 확인한다.
+     *
+     * @param def 서비스 정의
+     * @return lib/ 에 존재하는 JAR File, 없으면 null
+     */
+    private File findBundledJar(ServiceDefinition def) {
+        String cmd = def.getStartCommand();
+        if (cmd == null || cmd.isBlank()) return null;
+
+        String[] tokens = cmd.trim().split("\\s+");
+        for (int i = 0; i < tokens.length - 1; i++) {
+            if ("-jar".equalsIgnoreCase(tokens[i])) {
+                String jarName = tokens[i + 1];
+                File bundled = Path.of("lib", jarName).toFile();
+                if (bundled.exists()) return bundled;
+                break;
+            }
+        }
+        return null;
+    }
+
+    @FXML
+    private void onUninstall() {
+        if (selectedInstance == null) return;
+        ServiceDefinition def = selectedInstance.getDefinition();
+
+        // 서비스가 실행 중이면 먼저 경고 확인
+        if (selectedInstance.getStatus() == ServiceStatus.RUNNING
+                || selectedInstance.getStatus() == ServiceStatus.STARTING) {
+            Alert warn = new Alert(Alert.AlertType.WARNING,
+                    "서비스가 현재 실행 중입니다.\n중지 후 제거하는 것을 권장합니다.\n\n그래도 제거하시겠습니까?",
+                    ButtonType.YES, ButtonType.NO);
+            warn.setTitle("실행 중 제거 경고");
+            Optional<ButtonType> result = warn.showAndWait();
+            if (result.isEmpty() || result.get() != ButtonType.YES) return;
+        }
+
+        // installDir이 있으면 런타임 타입과 무관하게 디렉토리 삭제 여부 확인
+        if (def.getInstallDir() != null) {
+            Path installDir = Path.of(def.getInstallDir());
+            if (installDir.toFile().exists()) {
+                Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
+                        "설치 디렉토리를 삭제하시겠습니까?\n" + installDir,
+                        ButtonType.YES, ButtonType.NO);
+                confirm.setTitle("제거 확인");
+                confirm.showAndWait().ifPresent(btn -> {
+                    if (btn == ButtonType.YES) {
+                        new Thread(() -> {
+                            try {
+                                deleteDirectory(installDir);
+                                Platform.runLater(() -> {
+                                    installLogArea.appendText("삭제 완료: " + installDir + "\n");
+                                    markUninstalled();
+                                });
+                            } catch (Exception e) {
+                                Platform.runLater(() ->
+                                        installLogArea.appendText("삭제 오류: " + e.getMessage() + "\n"));
+                            }
+                        }, "uninstall-" + def.getName()).start();
+                        return;
+                    }
+                    // 아니오: 파일은 남기고 상태만 변경
+                    markUninstalled();
+                });
+                return;
+            }
+        }
+
+        markUninstalled();
+    }
+
+    /** 설치 탭 UI를 미설치 상태로 초기화한다. */
+    private void markUninstalled() {
+        if (selectedInstance != null)
+            selectedInstance.setStatus(ServiceStatus.NOT_INSTALLED);
+        installBtn.setDisable(false);
+        uninstallBtn.setDisable(true);
+        installLogArea.appendText("제거되었습니다.\n");
+    }
+
+    /**
+     * 디렉토리와 하위 파일을 재귀 삭제한다.
+     * Windows에서 .git 내부 파일이 읽기 전용인 경우 쓰기 가능으로 변경 후 삭제한다.
+     *
+     * @param dir 삭제할 디렉토리 경로
+     * @throws Exception 삭제 실패 시
+     */
+    private void deleteDirectory(Path dir) throws Exception {
+        if (!dir.toFile().exists()) return;
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(java.util.Comparator.reverseOrder())
+                  .forEach(p -> {
+                      try {
+                          // 읽기 전용 파일(Windows .git 내부 등)은 쓰기 허용 후 삭제
+                          p.toFile().setWritable(true);
+                          Files.delete(p);
+                      } catch (Exception e) {
+                          installLogArea.appendText("삭제 실패: " + p + " (" + e.getMessage() + ")\n");
+                      }
+                  });
+        }
+    }
+
+    // =========================================================
+    // Toolbar actions
+    // =========================================================
+
+    /**
+     * 기본 제공 서비스가 있으면 선택 다이얼로그를 먼저 표시하고, 그 결과로 추가 폼을 연다.
+     */
+    @FXML
+    private void onAddService() {
+        Stage owner = (Stage) menuBar.getScene().getWindow();
+
+        // 기본 제공 서비스가 있으면 선택 다이얼로그 먼저 표시
+        List<org.kyj.llmmanager.model.ServiceDefinition> builtins =
+                ctx.getBuiltinServiceLoader().loadAll();
+
+        ServiceDefinition prefill = null;
+        if (!builtins.isEmpty()) {
+            try {
+                javafx.fxml.FXMLLoader loader = new javafx.fxml.FXMLLoader(
+                        getClass().getResource("/org/kyj/llmmanager/builtin-services.fxml"));
+                Stage builtinStage = new Stage();
+                builtinStage.setTitle("서비스 추가");
+                builtinStage.setScene(SceneFactory.create(loader.load(), 720));
+                builtinStage.initOwner(owner);
+                builtinStage.initModality(javafx.stage.Modality.WINDOW_MODAL);
+                SceneFactory.autoHeight(builtinStage);
+
+                BuiltinServicesController ctrl = loader.getController();
+                ctrl.setItems(builtins);
+                builtinStage.showAndWait();
+
+                if (ctrl.isManualRequested()) {
+                    // 직접 입력: 빈 폼 열기
+                } else if (ctrl.getSelected() != null) {
+                    prefill = ctrl.getSelected();
+                } else {
+                    return; // 취소
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        AddServiceDialog dialog = new AddServiceDialog(owner, prefill);
+        dialog.showAndWait().ifPresent(def -> {
+            ctx.getServiceRegistry().add(def);
+            ServiceInstance inst = ctx.getProcessManager().getOrCreate(def);
+            instanceList.add(inst);
+            serviceListView.getSelectionModel().selectLast();
+            updateStatusBar();
+        });
+    }
+
+    @FXML
+    private void onSettings() {
+        new SettingsDialog((Stage) menuBar.getScene().getWindow()).showAndWait();
+    }
+
+    /**
+     * 서비스별 마크다운 도움말을 WebView 다이얼로그로 표시한다.
+     */
+    @FXML
+    private void onHelp() {
+        new HelpDialog((Stage) menuBar.getScene().getWindow()).show();
+    }
+
+    /**
+     * 내장 API 서버의 Swagger UI를 기본 브라우저로 연다.
+     * API 서버가 비활성이면 안내 메시지를 표시한다.
+     */
+    @FXML
+    private void onOpenApiServer() {
+        var apiServer = ctx.getApiServer();
+        if (!apiServer.isRunning()) {
+            new Alert(Alert.AlertType.INFORMATION,
+                    "API 서버가 실행 중이 아닙니다.\n설정 → 환경설정에서 'API 서버 활성화'를 켜 주세요.",
+                    ButtonType.OK).showAndWait();
+            return;
+        }
+        String url = "http://localhost:" + apiServer.getPort() + "/swagger-ui";
+        try {
+            java.awt.Desktop.getDesktop().browse(java.net.URI.create(url));
+        } catch (Exception e) {
+            new Alert(Alert.AlertType.ERROR,
+                    "브라우저를 열 수 없습니다:\n" + url, ButtonType.OK).showAndWait();
+        }
+    }
+
+    /** 서비스 선택을 해제하고 대시보드 홈 뷰로 돌아간다. */
+    @FXML
+    private void onDashboard() {
+        serviceListView.getSelectionModel().clearSelection();
+        selectedInstance = null;
+        showDashboard();
+    }
+
+    @FXML
+    private void onLlmSkills() {
+        try {
+            FXMLLoader loader = new FXMLLoader(
+                getClass().getResource("/org/kyj/llmmanager/llm-skills.fxml"));
+            Stage stage = new Stage();
+            stage.setTitle("LLM 스킬 & 룰 설치");
+            stage.setScene(SceneFactory.create(loader.load()));  // FXML prefWidth/prefHeight 그대로 사용
+            stage.initOwner(menuBar.getScene().getWindow());
+            stage.initModality(Modality.NONE);
+            stage.show();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    @FXML
+    private void onRefresh() {
+        loadServices();
+        showDashboard();  // 새로고침 후 대시보드로 복귀
+    }
+
+    /**
+     * 확인 후 선택 서비스를 중지하고 Registry에서 제거한다.
+     */
+    @FXML
+    private void onDeleteService() {
+        if (selectedInstance == null) return;
+        ServiceDefinition def = selectedInstance.getDefinition();
+
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
+                "'" + def.getName() + "' 서비스를 목록에서 제거하시겠습니까?",
+                ButtonType.YES, ButtonType.NO);
+        confirm.setTitle("서비스 제거");
+        confirm.showAndWait().ifPresent(btn -> {
+            if (btn == ButtonType.YES) {
+                // Stop if running
+                if (selectedInstance.getStatus() == ServiceStatus.RUNNING) {
+                    ctx.getProcessManager().stop(selectedInstance);
+                }
+                ctx.getServiceRegistry().remove(def.getId());
+                ctx.getProcessManager().remove(def.getId());
+                instanceList.remove(selectedInstance);
+                selectedInstance = null;
+                updateStatusBar();
+                showDashboard();  // 삭제 후 대시보드로 복귀
+            }
+        });
+    }
+
+    // =========================================================
+    // Helpers
+    // =========================================================
+
+    // =========================================================
+    // 대시보드 / 상세 뷰 전환
+    // =========================================================
+
+    /** 대시보드 홈 뷰를 표시하고 서비스 카드를 빌드한다. */
+    private void showDashboard() {
+        detailHeader.setVisible(false);
+        detailHeader.setManaged(false);
+        dashboardPane.setVisible(true);
+        dashboardPane.setManaged(true);
+        detailTabPane.setVisible(false);
+        detailTabPane.setManaged(false);
+        buildDashboardCards();
+    }
+
+    /** 서비스 상세 뷰를 표시한다. 선택된 서비스가 있을 때 호출. */
+    private void showDetail() {
+        detailHeader.setVisible(true);
+        detailHeader.setManaged(true);
+        dashboardPane.setVisible(false);
+        dashboardPane.setManaged(false);
+        detailTabPane.setVisible(true);
+        detailTabPane.setManaged(true);
+    }
+
+    /**
+     * 현재 서비스 목록을 기반으로 대시보드 카드를 생성한다.
+     * statusProperty 리스너로 상태 변경 시 카드 내 색상·버튼을 실시간 갱신한다.
+     */
+    private void buildDashboardCards() {
+        dashboardCardPane.getChildren().clear();
+        List<ServiceInstance> instances = ctx.getProcessManager().getAllInstances();
+        for (ServiceInstance inst : instances) {
+            dashboardCardPane.getChildren().add(createServiceCard(inst));
+        }
+        updateDashboardSummary(instances);
+    }
+
+    /**
+     * 서비스 인스턴스 하나에 대한 카드 노드를 생성한다.
+     *
+     * @param inst 카드를 만들 서비스 인스턴스
+     * @return 완성된 카드 VBox
+     */
+    private javafx.scene.Node createServiceCard(ServiceInstance inst) {
+        // 상태 점
+        Circle dot = new Circle(6);
+        applyCardDotColor(dot, inst.getStatus());
+
+        // 서비스 이름 — 길면 말줄임표
+        Label nameLabel = new Label(inst.getDefinition().getName());
+        nameLabel.getStyleClass().add("card-name");
+        nameLabel.setWrapText(false);
+        nameLabel.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
+        nameLabel.setMaxWidth(160);
+
+        javafx.scene.layout.HBox nameRow = new javafx.scene.layout.HBox(8, dot, nameLabel);
+        nameRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+
+        // 상태 텍스트
+        Label statusLabel = new Label(inst.getStatus().getLabel());
+        statusLabel.getStyleClass().add("card-status");
+
+        // 포트
+        Label portLabel = new Label(
+                inst.getDefinition().getPort() != null ? "Port: " + inst.getDefinition().getPort() : "");
+        portLabel.getStyleClass().add("card-port");
+
+        // 설명 — 한 줄, 넘치면 말줄임표
+        Label descLabel = new Label(
+                inst.getDefinition().getDescription() != null ? inst.getDefinition().getDescription() : "");
+        descLabel.getStyleClass().add("arg-desc");
+        descLabel.setWrapText(false);
+        descLabel.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
+        descLabel.setMaxWidth(Double.MAX_VALUE);
+
+        // 시작/중지 버튼
+        Button actionBtn = new Button(cardActionLabel(inst.getStatus()));
+        actionBtn.setStyle(cardActionStyle(inst.getStatus()));
+        actionBtn.setMaxWidth(Double.MAX_VALUE);
+        actionBtn.setOnAction(e -> {
+            if (inst.getStatus() == ServiceStatus.RUNNING) {
+                ctx.getProcessManager().stop(inst);
+            } else if (inst.getStatus() == ServiceStatus.STOPPED
+                    || inst.getStatus() == ServiceStatus.INSTALLED
+                    || inst.getStatus() == ServiceStatus.ERROR) {
+                ctx.getProcessManager().start(inst);
+            }
+        });
+
+        // 상세 보기 버튼
+        Button detailBtn = new Button("상세 보기");
+        detailBtn.setStyle("-fx-font-size: 10px;");
+        detailBtn.setMaxWidth(Double.MAX_VALUE);
+        detailBtn.setOnAction(e -> {
+            serviceListView.getSelectionModel().select(inst);
+        });
+
+        // statusProperty 구독 → 카드 실시간 갱신
+        inst.statusProperty().addListener((obs, old, newStatus) -> {
+            applyCardDotColor(dot, newStatus);
+            statusLabel.setText(newStatus.getLabel());
+            actionBtn.setText(cardActionLabel(newStatus));
+            actionBtn.setStyle(cardActionStyle(newStatus));
+            updateDashboardSummary(ctx.getProcessManager().getAllInstances());
+        });
+
+        // 스페이서 — 설명과 버튼 사이 여백을 채워 버튼 위치를 카드 하단에 고정
+        Region spacer = new Region();
+        VBox.setVgrow(spacer, Priority.ALWAYS);
+
+        VBox card = new VBox(8, nameRow, statusLabel, portLabel, descLabel,
+                spacer, new Separator(), actionBtn, detailBtn);
+        card.setPadding(new Insets(14));
+        card.setPrefWidth(210);
+        card.setMaxWidth(210);
+        card.setPrefHeight(210);  // 카드 높이 고정
+        card.getStyleClass().add("service-card");
+
+        return card;
+    }
+
+    private void applyCardDotColor(Circle dot, ServiceStatus status) {
+        try { dot.setFill(Color.web(status.getColor())); }
+        catch (Exception ignored) { dot.setFill(Color.GRAY); }
+    }
+
+    private String cardActionLabel(ServiceStatus status) {
+        return status == ServiceStatus.RUNNING ? "■  중지" : "▶  시작";
+    }
+
+    private String cardActionStyle(ServiceStatus status) {
+        return status == ServiceStatus.RUNNING
+                ? "-fx-background-color:#5a2d2d; -fx-text-fill:#dd8888; -fx-background-radius:4;"
+                : "-fx-background-color:#2d5a2d; -fx-text-fill:#88dd88; -fx-background-radius:4;";
+    }
+
+    /** 대시보드 상단 요약 레이블을 갱신한다. */
+    private void updateDashboardSummary(List<ServiceInstance> instances) {
+        long running = instances.stream().filter(i -> i.getStatus() == ServiceStatus.RUNNING).count();
+        long error   = instances.stream().filter(i -> i.getStatus() == ServiceStatus.ERROR).count();
+        dashTotalLabel  .setText("전체 " + instances.size() + "개");
+        dashRunningLabel.setText("실행 중 " + running + "개");
+        dashErrorLabel  .setText(error > 0 ? "오류 " + error + "개" : "");
+        dashErrorLabel  .setVisible(error > 0);
+        dashErrorLabel  .setManaged(error > 0);
+    }
+
+    /**
+     * 하단 상태 바를 현재 서비스 수와 실행 중 수로 갱신한다.
+     */
+    private void updateStatusBar() {
+        long running = instanceList.stream()
+                .filter(i -> i.getStatus() == ServiceStatus.RUNNING).count();
+        statusBarLabel.setText("서비스: " + instanceList.size() + "개  |  실행중: " + running + "개");
+    }
+
+    // =========================================================
+    // 시스템 리소스 패널
+    // =========================================================
+
+    /**
+     * SystemMonitorService에서 최신 수집값을 읽어 CPU·메모리 게이지와 레이블을 갱신한다.
+     * 2초 간격 Timeline에서 JavaFX 스레드로 호출된다.
+     */
+    private void updateSystemStats() {
+        if (ctx == null || cpuBar == null) return;
+        SystemMonitorService mon = ctx.getSystemMonitor();
+        if (mon == null) return;
+
+        // ── CPU ──────────────────────────────────────────────
+        double cpu = Math.max(0, Math.min(1, mon.getCpuLoad()));
+        cpuBar.setProgress(cpu);
+        cpuBar.setStyle("-fx-accent: " + gaugeColor(cpu) + ";");
+        cpuLabel.setText(String.format("%5.1f %%   %d코어 / %d스레드",
+                cpu * 100, mon.getPhysicalCores(), mon.getLogicalCores()));
+
+        // ── 물리 메모리 ──────────────────────────────────────
+        long usedMem  = mon.getUsedMemory();
+        long totalMem = mon.getTotalMemory();
+        double memRatio = totalMem > 0 ? (double) usedMem / totalMem : 0;
+        memBar.setProgress(memRatio);
+        memBar.setStyle("-fx-accent: " + gaugeColor(memRatio) + ";");
+        memLabel.setText(String.format("%s / %s  (%4.1f %%)",
+                SystemMonitorService.formatBytes(usedMem),
+                SystemMonitorService.formatBytes(totalMem),
+                memRatio * 100));
+
+        // ── JVM 힙 ───────────────────────────────────────────
+        Runtime rt      = Runtime.getRuntime();
+        long jvmUsed    = rt.totalMemory() - rt.freeMemory();
+        long jvmMax     = rt.maxMemory();
+        double jvmRatio = jvmMax > 0 ? (double) jvmUsed / jvmMax : 0;
+        jvmBar.setProgress(jvmRatio);
+        jvmBar.setStyle("-fx-accent: " + gaugeColor(jvmRatio) + ";");
+        jvmLabel.setText(String.format("%s / %s  (%4.1f %%)",
+                SystemMonitorService.formatBytes(jvmUsed),
+                SystemMonitorService.formatBytes(jvmMax),
+                jvmRatio * 100));
+    }
+
+    /**
+     * 비율에 따른 게이지 색상을 CSS 색상 문자열로 반환한다.
+     * 0~49%: 초록, 50~79%: 노랑, 80%+: 빨강
+     */
+    private String gaugeColor(double ratio) {
+        if (ratio < 0.50) return "#44BB44";
+        if (ratio < 0.80) return "#FFAA00";
+        return "#EE4444";
+    }
+
+    /**
+     * 서비스 상세 다이얼로그를 열고, 수정 저장 시 UI를 갱신한다.
+     *
+     * @param inst 상세를 볼 서비스 인스턴스
+     */
+    private void openDetailDialog(ServiceInstance inst) {
+        new ServiceDetailDialog(
+                (Stage) menuBar.getScene().getWindow(),
+                inst,
+                ctx,
+                () -> {
+                    // 포트·이름 등 정의 변경은 status 리스너에 연결되지 않으므로
+                    // 대시보드 가시 여부와 무관하게 항상 카드를 재빌드한다.
+                    buildDashboardCards();
+                    if (inst.equals(selectedInstance)) refreshDetail();
+                }
+        ).show();
+    }
+
+    private void showInfo(String msg) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, msg, ButtonType.OK);
+        alert.showAndWait();
+    }
+}

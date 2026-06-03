@@ -1,0 +1,108 @@
+[
+  {
+    "id": "cursor",
+    "name": "Cursor IDE",
+    "emoji": "📝",
+    "description": "AI 코드 에디터 Cursor 규칙 파일",
+    "packs": [
+      {
+        "id": "cursor-general",
+        "name": "일반 규칙",
+        "tags": ["general"],
+        "files": [
+          { "resourcePath": "llm-skills/cursor/rules/000-general.mdc",
+            "targetPath": ".cursor/rules/000-general.mdc", "template": false }
+        ]
+      },
+      {
+        "id": "cursor-java",
+        "name": "Java 규칙",
+        "tags": ["java"],
+        "files": [
+          { "resourcePath": "llm-skills/cursor/rules/100-java.mdc",
+            "targetPath": ".cursor/rules/100-java.mdc", "template": false }
+        ]
+      },
+      {
+        "id": "cursor-python",
+        "name": "Python 규칙",
+        "tags": ["python"],
+        "files": [
+          { "resourcePath": "llm-skills/cursor/rules/100-python.mdc",
+            "targetPath": ".cursor/rules/100-python.mdc", "template": false }
+        ]
+      },
+      {
+        "id": "cursor-typescript",
+        "name": "TypeScript/React 규칙",
+        "tags": ["typescript", "react"],
+        "files": [
+          { "resourcePath": "llm-skills/cursor/rules/100-typescript.mdc",
+            "targetPath": ".cursor/rules/100-typescript.mdc", "template": false }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "claude",
+    "name": "Claude Code",
+    "emoji": "🤖",
+    "description": "Anthropic Claude Code CLI 설정",
+    "packs": [
+      {
+        "id": "claude-base",
+        "name": "CLAUDE.md 기본 규칙",
+        "tags": ["general"],
+        "files": [
+          { "resourcePath": "llm-skills/claude/CLAUDE.md",
+            "targetPath": "CLAUDE.md", "template": true }
+        ]
+      },
+      {
+        "id": "claude-commands",
+        "name": "커스텀 슬래시 명령어",
+        "tags": ["general"],
+        "files": [
+          { "resourcePath": "llm-skills/claude/commands/review.md",
+            "targetPath": ".claude/commands/review.md", "template": false },
+          { "resourcePath": "llm-skills/claude/commands/test.md",
+            "targetPath": ".claude/commands/test.md", "template": false }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "gemini",
+    "name": "Gemini CLI",
+    "emoji": "✨",
+    "description": "Google Gemini CLI 설정",
+    "packs": [
+      {
+        "id": "gemini-base",
+        "name": "GEMINI.md 기본 규칙",
+        "tags": ["general"],
+        "files": [
+          { "resourcePath": "llm-skills/gemini/GEMINI.md",
+            "targetPath": "GEMINI.md", "template": true }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "copilot",
+    "name": "GitHub Copilot",
+    "emoji": "🐙",
+    "description": "GitHub Copilot 지시사항",
+    "packs": [
+      {
+        "id": "copilot-base",
+        "name": "Copilot 지시사항",
+        "tags": ["general"],
+        "files": [
+          { "resourcePath": "llm-skills/copilot/copilot-instructions.md",
+            "targetPath": ".github/copilot-instructions.md", "template": true }
+        ]
+      }
+    ]
+  }
+]

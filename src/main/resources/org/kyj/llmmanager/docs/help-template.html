@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <style>
+    :root {
+      --bg:           #1a1a2e;
+      --bg2:          #1e1e2e;
+      --bg3:          #13131f;
+      --border:       #2a2a3a;
+      --text:         #cccccc;
+      --text-dim:     #888888;
+      --accent:       #336699;
+      --accent-light: #aaccff;
+      --code-bg:      #0d0d1a;
+      --code-text:    #88dd88;
+      --link:         #66aaff;
+      --warn:         #ffaa44;
+      --tip:          #44bbaa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+      font-size: 14px;
+      line-height: 1.75;
+      padding: 28px 40px 48px;
+      max-width: 880px;
+    }
+
+    /* ── 제목 ─────────────────────────────────────── */
+    h1 {
+      color: var(--accent-light);
+      font-size: 22px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+      margin-bottom: 22px;
+    }
+    h2 {
+      color: var(--accent-light);
+      font-size: 16px;
+      margin: 32px 0 10px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 {
+      color: #9999cc;
+      font-size: 14px;
+      margin: 20px 0 6px;
+    }
+
+    /* ── 본문 ─────────────────────────────────────── */
+    p  { margin: 8px 0; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 26px 0; }
+    a  { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    ul, ol { padding-left: 22px; margin: 8px 0; }
+    li { margin: 3px 0; }
+
+    /* ── 코드 ─────────────────────────────────────── */
+    code {
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 12.5px;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 18px;
+      overflow-x: auto;
+      margin: 12px 0;
+      line-height: 1.55;
+    }
+    pre code { padding: 0; background: none; font-size: 12.5px; }
+
+    /* ── 테이블 ───────────────────────────────────── */
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 14px 0;
+      font-size: 13px;
+    }
+    th {
+      background: var(--bg2);
+      color: var(--accent-light);
+      padding: 8px 14px;
+      text-align: left;
+      border: 1px solid var(--border);
+      font-weight: 600;
+    }
+    td {
+      padding: 7px 14px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: var(--bg3); }
+
+    /* ── 인용 / 알림 박스 ─────────────────────────── */
+    blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 8px 16px;
+      margin: 14px 0;
+      color: var(--text-dim);
+      background: var(--bg2);
+      border-radius: 0 4px 4px 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="content">로딩 중…</div>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <script>
+    (function () {
+      var md = __MARKDOWN_JSON__;
+      if (typeof marked !== 'undefined') {
+        document.getElementById('content').innerHTML = marked.parse(md);
+      } else {
+        /* CDN 실패 시: 줄바꿈만 처리해 raw 텍스트로 표시 */
+        document.getElementById('content').innerText = md;
+      }
+    })();
+  </script>
+</body>
+</html>

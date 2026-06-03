@@ -1,0 +1,27 @@
+---
+description: Python specific coding rules
+globs: ["**/*.py", "**/requirements.txt", "**/pyproject.toml"]
+alwaysApply: false
+---
+
+# Python 규칙
+
+## 버전 및 스타일
+- Python 3.11+ 사용
+- PEP 8 준수
+- Black 포매터 사용
+- Type hints 필수 (함수 시그니처)
+
+## 설계 원칙
+- 데이터 클래스에 `@dataclass` 또는 `pydantic.BaseModel` 사용
+- 비동기 코드: `asyncio` + `async/await`
+- 예외는 구체적으로 (bare `except:` 금지)
+
+## 패키지 관리
+- Poetry 또는 uv 사용 권장
+- `requirements.txt`는 `pip freeze` 대신 수동 관리
+
+## FastAPI 규칙 (해당 시)
+- Pydantic v2 모델 사용
+- 라우터는 기능별로 분리
+- 의존성 주입에 `Depends()` 활용

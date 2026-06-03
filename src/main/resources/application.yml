@@ -1,0 +1,46 @@
+# ════════════════════════════════════════════════════════════════════════
+# LLM Manager 기본 설정 (application.yml)
+#
+# 우선순위: CLI 인수 > settings.json (GUI 저장) > 이 파일
+#
+# CLI 오버라이드 방법
+#   start.bat --api.server.port=9090 --api.server.enabled=true
+#   gradlew run --args="--api.server.port=9090"
+# ════════════════════════════════════════════════════════════════════════
+
+# 내장 REST API 서버 (Javalin + Swagger UI)
+api:
+  server:
+    # 앱 시작 시 자동 활성화 여부
+    # CLI: --api.server.enabled=true
+    enabled: false
+    # HTTP 리슨 포트
+    # CLI: --api.server.port=8185
+    port: 8185
+
+# 런타임 명령어
+runtime:
+  # Python 실행 명령어 (Windows: python, Linux/Mac: python3)
+  # CLI: --runtime.python=python3
+  python: python
+  # Python 설치 기본 경로 (비워 두면 PATH 기본값 사용)
+  # CLI: --runtime.python-home=/usr/local
+  python-home: ""
+  # Node.js 실행 명령어
+  # CLI: --runtime.node=node
+  node: node
+  # Node.js 설치 기본 경로 (비워 두면 PATH 기본값 사용)
+  # CLI: --runtime.node-home=/usr/local
+  node-home: ""
+  # Java 실행 명령어
+  # CLI: --runtime.java=java
+  java: java
+  # JAVA_HOME 경로 (비워 두면 JAVA_HOME 환경변수 사용)
+  # CLI: --runtime.java-home=C:\Java\jdk21
+  java-home: ""
+
+# 서비스 기본 설치 경로
+# 비워 두면 OS별 기본값: Windows=~/llm-services, Unix=~/.local/share/llm-services
+# CLI: --install.base=D:\llm-services
+install:
+  base: ""

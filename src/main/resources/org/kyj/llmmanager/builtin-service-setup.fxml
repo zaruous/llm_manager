@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="org.kyj.llmmanager.ui.controller.BuiltinServiceSetupController"
+      spacing="10" style="-fx-padding: 16;" minWidth="580">
+
+    <!-- 서비스 헤더 -->
+    <VBox spacing="3">
+        <Label fx:id="serviceNameLabel"
+               style="-fx-font-size: 15px; -fx-font-weight: bold;"/>
+        <Label fx:id="serviceDescLabel"
+               style="-fx-font-size: 11px; -fx-text-fill: #888888;" wrapText="true"/>
+    </VBox>
+
+    <Separator/>
+
+    <!-- 설치 경로: 모든 builtin 서비스에서 working dir로 사용 -->
+    <HBox fx:id="installDirRow" spacing="6" alignment="CENTER_LEFT">
+        <Label text="설치 경로" minWidth="80" style="-fx-font-weight: bold;"/>
+        <TextField fx:id="installDirField" HBox.hgrow="ALWAYS"
+                   promptText="실행 파일이 있는 디렉토리 경로"/>
+        <Button text="찾기..." onAction="#onBrowse"/>
+    </HBox>
+
+    <!-- 동적 인수 섹션 (Controller에서 채워짐) -->
+    <ScrollPane fitToWidth="true" hbarPolicy="NEVER" vbarPolicy="AS_NEEDED"
+                style="-fx-background-color: transparent; -fx-border-color: transparent;"
+                maxHeight="460">
+        <VBox fx:id="mainContent" spacing="4"/>
+    </ScrollPane>
+
+    <Separator/>
+
+    <!-- 버튼 바 -->
+    <HBox spacing="10" alignment="CENTER_RIGHT">
+        <Button text="취소" onAction="#onCancel" prefWidth="80"/>
+        <Button text="추가" onAction="#onConfirm" prefWidth="80"
+                defaultButton="true"
+                style="-fx-background-color: #336699; -fx-text-fill: white;"/>
+    </HBox>
+
+</VBox>

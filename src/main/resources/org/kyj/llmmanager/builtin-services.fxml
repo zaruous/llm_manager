@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="org.kyj.llmmanager.ui.controller.BuiltinServicesController"
+            prefWidth="720" prefHeight="460">
+
+    <!-- ===== HEADER ===== -->
+    <top>
+        <VBox style="-fx-padding: 14 16 10 16; -fx-border-color: #2a2a3a; -fx-border-width: 0 0 1 0;">
+            <Label text="기본 제공 서비스"
+                   style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+            <Label text="앱에 내장된 서비스를 선택하거나, 직접 입력으로 추가할 수 있습니다."
+                   style="-fx-text-fill: #888888; -fx-font-size: 12px;"/>
+        </VBox>
+    </top>
+
+    <!-- ===== CENTER: list + detail ===== -->
+    <center>
+        <SplitPane dividerPositions="0.38">
+
+            <!-- LEFT: built-in service list -->
+            <VBox minWidth="200" style="-fx-border-color: #2a2a3a; -fx-border-width: 0 1 0 0;">
+                <Label text="기본 제공 목록"
+                       style="-fx-padding: 8 12; -fx-font-size: 11px; -fx-text-fill: #888888;
+                              -fx-border-color: #2a2a3a; -fx-border-width: 0 0 1 0;"/>
+                <ListView fx:id="builtinListView" VBox.vgrow="ALWAYS"/>
+            </VBox>
+
+            <!-- RIGHT: detail panel -->
+            <ScrollPane fitToWidth="true" fitToHeight="false">
+                <VBox fx:id="detailPane" spacing="12"
+                      style="-fx-padding: 16;">
+
+                    <Label fx:id="detailName" text="서비스를 선택하세요"
+                           style="-fx-font-size: 15px; -fx-font-weight: bold;"/>
+                    <Label fx:id="detailDesc" text=""
+                           wrapText="true"
+                           style="-fx-text-fill: #888888; -fx-font-size: 12px;"/>
+
+                    <Separator/>
+
+                    <!-- Meta grid -->
+                    <GridPane hgap="16" vgap="8">
+                        <columnConstraints>
+                            <ColumnConstraints minWidth="80" prefWidth="90"/>
+                            <ColumnConstraints hgrow="ALWAYS"/>
+                        </columnConstraints>
+
+                        <Label text="런타임" style="-fx-text-fill:#888888;"
+                               GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                        <Label fx:id="detailRuntime" text="-"
+                               GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+
+                        <Label text="포트" style="-fx-text-fill:#888888;"
+                               GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                        <Label fx:id="detailPort" text="-"
+                               GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+
+                        <Label text="저장소" style="-fx-text-fill:#888888;"
+                               GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                        <Label fx:id="detailRepo" text="-" wrapText="true"
+                               GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+
+                        <Label text="시작 명령" style="-fx-text-fill:#888888;"
+                               GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+                        <Label fx:id="detailStartCmd" text="-" wrapText="true"
+                               GridPane.columnIndex="1" GridPane.rowIndex="3"/>
+                    </GridPane>
+
+                    <Separator/>
+
+                    <!-- Install commands -->
+                    <Label text="설치 명령어" style="-fx-font-weight: bold; -fx-font-size: 12px;"/>
+                    <TextArea fx:id="detailInstallCmds" editable="false" wrapText="true"
+                              prefHeight="70"
+                              style="-fx-font-family: monospace; -fx-font-size: 11px;"/>
+
+                    <!-- Arg specs -->
+                    <Label text="실행 인수" style="-fx-font-weight: bold; -fx-font-size: 12px;"/>
+                    <VBox fx:id="detailArgsBox" spacing="4"/>
+
+                </VBox>
+            </ScrollPane>
+
+        </SplitPane>
+    </center>
+
+    <!-- ===== BOTTOM BUTTONS ===== -->
+    <bottom>
+        <HBox spacing="10" alignment="CENTER_RIGHT"
+              style="-fx-padding: 10 16; -fx-border-color: #2a2a3a; -fx-border-width: 1 0 0 0;">
+            <Button text="직접 입력" onAction="#onManualInput" prefWidth="90"/>
+            <Button text="취소" onAction="#onCancel" prefWidth="80"/>
+            <Button fx:id="selectBtn" text="이 서비스로 추가" onAction="#onSelect"
+                    defaultButton="true" disable="true" prefWidth="140"
+                    style="-fx-background-color: #336699; -fx-text-fill: white;"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>

@@ -1,0 +1,335 @@
+/*
+ * LLM Manager — Application Stylesheet
+ * Design system: Catppuccin Mocha
+ * https://catppuccin.com/palette
+ *
+ * ┌─ Palette ───────────────────────────────────────────────────┐
+ * │ Crust    #11111b  Mantle   #181825  Base     #1e1e2e        │
+ * │ Surface0 #313244  Surface1 #45475a  Surface2 #585b70        │
+ * │ Overlay0 #6c7086  Overlay1 #7f849c  Overlay2 #9399b2        │
+ * │ Subtext0 #a6adc8  Subtext1 #bac2de  Text     #cdd6f4        │
+ * │ Blue     #89b4fa  Lavender #b4befe  Sapphire #74c7ec        │
+ * │ Teal     #94e2d5  Green    #a6e3a1  Yellow   #f9e2af        │
+ * │ Red      #f38ba8  Mauve    #cba6f7  Peach    #fab387        │
+ * └─────────────────────────────────────────────────────────────┘
+ */
+
+/* ── 전역 폰트 & AtlantaFX 색상 변수 오버라이드 ────────────────────── */
+.root {
+    -fx-font-family: "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+
+    /* Foreground */
+    -color-fg-default:       #cdd6f4;   /* Text      */
+    -color-fg-muted:         #a6adc8;   /* Subtext0  */
+    -color-fg-subtle:        #7f849c;   /* Overlay1  */
+    -color-fg-emphasis:      #cdd6f4;
+
+    /* Background */
+    -color-bg-default:       #1e1e2e;   /* Base      */
+    -color-bg-overlay:       #313244;   /* Surface0  */
+    -color-bg-subtle:        #313244;   /* Surface0  */
+    -color-bg-inset:         #181825;   /* Mantle    */
+
+    /* Border */
+    -color-border-default:   #45475a;   /* Surface1  */
+    -color-border-muted:     #313244;   /* Surface0  */
+    -color-border-subtle:    #313244;
+
+    /* Accent */
+    -color-accent-fg:        #89b4fa;   /* Blue      */
+    -color-accent-emphasis:  #89b4fa;
+    -color-accent-muted:     #313244;
+    -color-accent-subtle:    #1e1e2e;
+
+    /* Semantic */
+    -color-success-fg:       #a6e3a1;   /* Green     */
+    -color-success-emphasis: #a6e3a1;
+    -color-warning-fg:       #f9e2af;   /* Yellow    */
+    -color-warning-emphasis: #f9e2af;
+    -color-danger-fg:        #f38ba8;   /* Red       */
+    -color-danger-emphasis:  #f38ba8;
+}
+
+/* ── ListView ──────────────────────────────────────────────────────── */
+.list-view {
+    -fx-background-color: #1a1a2e;
+    -fx-border-color: transparent;
+}
+
+.list-cell {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-text-fill: #cdd6f4;
+}
+
+.list-cell:selected {
+    -fx-background-color: #313244;
+    -fx-text-fill: #cdd6f4;
+}
+
+.list-cell:hover:!selected {
+    -fx-background-color: #252540;
+}
+
+/* ── TabPane ───────────────────────────────────────────────────────── */
+.tab-pane .tab-header-area .tab-header-background {
+    -fx-background-color: #1e1e2e;
+}
+
+.tab-pane .tab {
+    -fx-background-color: #252535;
+}
+
+.tab-pane .tab:selected {
+    -fx-background-color: #313244;
+}
+
+.tab-pane .tab .tab-label {
+    -fx-text-fill: #7f849c;
+}
+
+.tab-pane .tab:selected .tab-label {
+    -fx-text-fill: #cdd6f4;
+}
+
+/* ── TextArea ──────────────────────────────────────────────────────── */
+.text-area {
+    -fx-background-color: #181825;
+    -fx-text-fill: #cdd6f4;
+    -fx-border-color: #45475a;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
+
+.text-area .content {
+    -fx-background-color: #181825;
+}
+
+/* ── TextField ─────────────────────────────────────────────────────── */
+.text-field {
+    -fx-background-color: #313244;
+    -fx-text-fill: #cdd6f4;
+    -fx-prompt-text-fill: #6c7086;
+    -fx-border-color: #45475a;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
+
+.text-field:focused {
+    -fx-border-color: #89b4fa;
+}
+
+/* ── Button ────────────────────────────────────────────────────────── */
+.button {
+    -fx-background-radius: 4;
+    -fx-cursor: hand;
+    -fx-text-fill: #cdd6f4;
+}
+
+/* ── ProgressBar ───────────────────────────────────────────────────── */
+.progress-bar .bar {
+    -fx-background-color: #89b4fa;
+    -fx-background-radius: 4;
+}
+
+.progress-bar .track {
+    -fx-background-color: #313244;
+    -fx-background-radius: 4;
+}
+
+/* ── Separator ─────────────────────────────────────────────────────── */
+.separator .line {
+    -fx-border-color: #45475a;
+}
+
+/* ── ScrollPane ────────────────────────────────────────────────────── */
+.scroll-pane {
+    -fx-background-color: transparent;
+}
+
+.scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+
+/* ── ScrollBar ─────────────────────────────────────────────────────── */
+.scroll-bar .thumb {
+    -fx-background-color: #585b70;
+    -fx-background-radius: 4;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: #7f849c;
+}
+
+.scroll-bar .track,
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+}
+
+/* ── ComboBox ──────────────────────────────────────────────────────── */
+.combo-box {
+    -fx-background-color: #313244;
+    -fx-border-color: #45475a;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
+
+.combo-box .list-cell {
+    -fx-text-fill: #cdd6f4;
+    -fx-background-color: transparent;
+}
+
+/* ── CheckBox ──────────────────────────────────────────────────────── */
+.check-box .box {
+    -fx-background-color: #313244;
+    -fx-border-color: #585b70;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+}
+
+.check-box:selected .box {
+    -fx-background-color: #89b4fa;
+    -fx-border-color: #89b4fa;
+}
+
+.check-box .mark {
+    -fx-background-color: #1e1e2e;
+}
+
+/* ── TitledPane ────────────────────────────────────────────────────── */
+.titled-pane > .title {
+    -fx-background-color: #313244;
+    -fx-text-fill: #bac2de;
+}
+
+.titled-pane > .title:hover {
+    -fx-background-color: #45475a;
+}
+
+.titled-pane > *.content {
+    -fx-background-color: #252535;
+    -fx-border-color: #45475a;
+}
+
+/* ── MenuBar / MenuItem ────────────────────────────────────────────── */
+.menu-bar {
+    -fx-background-color: #1e1e2e;
+    -fx-border-color: #45475a;
+    -fx-border-width: 0 0 1 0;
+}
+
+.menu-bar .menu .label,
+.menu-item .label {
+    -fx-text-fill: #cdd6f4;
+}
+
+.context-menu {
+    -fx-background-color: #313244;
+    -fx-border-color: #45475a;
+}
+
+/* ── ToolBar ───────────────────────────────────────────────────────── */
+.tool-bar {
+    -fx-background-color: #1e1e2e;
+    -fx-border-color: #45475a;
+    -fx-border-width: 0 0 1 0;
+}
+
+/* ── SplitPane ─────────────────────────────────────────────────────── */
+.split-pane-divider {
+    -fx-background-color: #45475a;
+    -fx-padding: 0 1;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   앱 전용 유틸리티 클래스
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── 실행 인수 ─────────────────────────────────────────────────────── */
+.arg-flag {
+    /* CLI 플래그 레이블 — 활성 */
+    -fx-font-family: "Consolas", "Courier New", monospace;
+    -fx-font-size: 11px;
+    -fx-text-fill: #89b4fa;   /* Blue */
+}
+
+.arg-flag-disabled {
+    /* CLI 플래그 레이블 — 비활성 */
+    -fx-font-family: "Consolas", "Courier New", monospace;
+    -fx-font-size: 11px;
+    -fx-text-fill: #585b70;   /* Surface2 */
+}
+
+.arg-desc {
+    /* 인수 설명 텍스트 */
+    -fx-font-size: 10px;
+    -fx-text-fill: #a6adc8;   /* Subtext0 */
+}
+
+.arg-header {
+    /* 인수 그리드 컬럼 헤더 */
+    -fx-font-size: 10px;
+    -fx-text-fill: #585b70;   /* Surface2 */
+}
+
+/* ── 섹션 제목 ─────────────────────────────────────────────────────── */
+.section-title {
+    -fx-font-weight: bold;
+    -fx-font-size: 12px;
+    -fx-text-fill: #b4befe;   /* Lavender */
+}
+
+/* ── 보조 텍스트 ────────────────────────────────────────────────────── */
+.hint-label {
+    -fx-font-size: 10px;
+    -fx-text-fill: #7f849c;   /* Overlay1 */
+}
+
+.text-muted {
+    -fx-text-fill: #7f849c;   /* Overlay1 */
+}
+
+/* ── 상태 색상 ──────────────────────────────────────────────────────── */
+.text-success { -fx-text-fill: #a6e3a1; -fx-font-size: 12px; -fx-font-weight: bold; }
+.text-danger  { -fx-text-fill: #f38ba8; -fx-font-size: 12px; }
+.text-accent  { -fx-text-fill: #89b4fa; }
+
+/* ── 대시보드 요약 레이블 ───────────────────────────────────────────── */
+.dash-total   { -fx-text-fill: #7f849c; -fx-font-size: 12px; }
+.dash-running { -fx-text-fill: #a6e3a1; -fx-font-size: 12px; -fx-font-weight: bold; }
+.dash-error   { -fx-text-fill: #f38ba8; -fx-font-size: 12px; }
+
+/* ── 서비스 카드 ────────────────────────────────────────────────────── */
+.service-card {
+    -fx-background-color: #1e1e2e;
+    -fx-border-color: #45475a;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.card-name {
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+    -fx-text-fill: #cdd6f4;   /* Text */
+}
+
+.card-status {
+    -fx-font-size: 11px;
+    -fx-text-fill: #7f849c;   /* Overlay1 */
+}
+
+.card-port {
+    -fx-font-size: 11px;
+    -fx-text-fill: #74c7ec;   /* Sapphire */
+}
+
+/* ── 서비스 인스턴스 목록 헤더 ──────────────────────────────────────── */
+.instance-list-header {
+    -fx-font-size: 10px;
+    -fx-text-fill: #585b70;   /* Surface2 */
+    -fx-font-weight: bold;
+    -fx-padding: 5 10 4 10;
+    -fx-border-color: #45475a;
+    -fx-border-width: 0 0 1 0;
+}

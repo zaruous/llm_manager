@@ -1,0 +1,28 @@
+---
+description: Java specific coding rules
+globs: ["**/*.java", "**/build.gradle", "**/pom.xml"]
+alwaysApply: false
+---
+
+# Java 규칙
+
+## 버전 및 스타일
+- Java 17+ 기능 적극 활용 (record, sealed, switch expression, var)
+- Google Java Style Guide 준수
+- 탭 대신 스페이스 4칸
+
+## 설계 원칙
+- 생성자 주입 방식 의존성 주입
+- 불변 객체 선호 (final 필드)
+- Optional 남용 금지 — 반환 타입에만 사용
+- 스트림/함수형 스타일 권장 (단, 가독성 저하 시 loop 사용)
+
+## 명명 규칙
+- 클래스: PascalCase
+- 메서드/변수: camelCase
+- 상수: UPPER_SNAKE_CASE
+- 패키지: 소문자
+
+## 빌드
+- Gradle 8+ 사용 시 Kotlin DSL 권장
+- 의존성 버전은 `libs.versions.toml`로 중앙 관리

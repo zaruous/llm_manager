@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.shape.Circle?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="org.kyj.llmmanager.ui.controller.MainController">
+
+    <!-- ===== TOP MENU BAR ===== -->
+    <top>
+        <MenuBar fx:id="menuBar" useSystemMenuBar="false">
+            <Menu text="서비스">
+                <MenuItem text="서비스 추가"  onAction="#onAddService"    accelerator="Ctrl+N"/>
+                <MenuItem text="서비스 제거"  onAction="#onDeleteService" accelerator="Delete"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="새로고침"     onAction="#onRefresh"       accelerator="F5"/>
+            </Menu>
+            <Menu text="보기">
+                <MenuItem text="대시보드"     onAction="#onDashboard"     accelerator="Ctrl+D"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="API 서비스"   onAction="#onOpenApiServer" accelerator="Ctrl+Shift+A"/>
+            </Menu>
+            <Menu text="도구">
+                <MenuItem text="LLM 스킬"    onAction="#onLlmSkills"/>
+            </Menu>
+            <Menu text="설정">
+                <MenuItem text="환경설정"     onAction="#onSettings"      accelerator="Ctrl+Comma"/>
+            </Menu>
+            <Menu text="도움말">
+                <MenuItem text="도움말 보기"  onAction="#onHelp"          accelerator="F1"/>
+            </Menu>
+        </MenuBar>
+    </top>
+
+    <!-- ===== CENTER SPLIT ===== -->
+    <center>
+        <SplitPane dividerPositions="0.27">
+
+            <!-- LEFT: 서비스 목록 -->
+            <VBox minWidth="200" style="-fx-border-color: #2a2a3a; -fx-border-width: 0 1 0 0;">
+                <TextField fx:id="searchField" promptText="🔍 검색..."
+                           style="-fx-padding: 8; -fx-background-radius: 0;"/>
+                <Label text="서비스 인스턴스" styleClass="instance-list-header"/>
+                <ListView fx:id="serviceListView" VBox.vgrow="ALWAYS"/>
+            </VBox>
+
+            <!-- RIGHT: 대시보드 or 서비스 상세 -->
+            <BorderPane>
+
+                <!-- 서비스 선택 시에만 표시되는 상세 헤더 -->
+                <top>
+                    <HBox fx:id="detailHeader" visible="false" managed="false"
+                          alignment="CENTER_LEFT" spacing="10"
+                          style="-fx-padding: 10 16 8 16;
+                                 -fx-border-color: #2a2a3a;
+                                 -fx-border-width: 0 0 1 0;">
+                        <Circle fx:id="detailStatusDot" radius="7" fill="#888888"/>
+                        <Label fx:id="detailNameLabel"
+                               style="-fx-font-size: 17px; -fx-font-weight: bold;"/>
+                        <Label fx:id="detailStatusLabel"
+                               style="-fx-text-fill: #888888; -fx-font-size: 12px;"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="← 대시보드" onAction="#onDashboard"
+                                style="-fx-font-size: 11px;"/>
+                    </HBox>
+                </top>
+
+                <center>
+                    <StackPane>
+
+                        <!-- ===== 대시보드 (기본 홈 뷰) ===== -->
+                        <BorderPane fx:id="dashboardPane">
+                            <top>
+                                <HBox alignment="CENTER_LEFT" spacing="20"
+                                      style="-fx-padding: 14 18 10 18;
+                                             -fx-border-color: #2a2a3a;
+                                             -fx-border-width: 0 0 1 0;">
+                                    <Label text="서비스 현황"
+                                           style="-fx-font-size: 15px; -fx-font-weight: bold;"/>
+                                    <Region HBox.hgrow="ALWAYS"/>
+                                    <Label fx:id="dashTotalLabel"   text="전체 0개"   styleClass="dash-total"/>
+                                    <Label fx:id="dashRunningLabel" text="실행 중 0개" styleClass="dash-running"/>
+                                    <Label fx:id="dashErrorLabel"   text=""           styleClass="dash-error"/>
+                                </HBox>
+                            </top>
+                            <center>
+                                <VBox>
+                                    <!-- ===== 시스템 리소스 패널 ===== -->
+                                    <GridPane hgap="10" vgap="8"
+                                              style="-fx-padding: 10 18 10 18;
+                                                     -fx-background-color: #13131f;
+                                                     -fx-border-color: #2a2a3a;
+                                                     -fx-border-width: 0 0 1 0;">
+                                        <columnConstraints>
+                                            <!-- 레이블 열: 고정 -->
+                                            <ColumnConstraints minWidth="52" prefWidth="52"
+                                                               halignment="RIGHT"/>
+                                            <!-- 게이지 열: 가변 -->
+                                            <ColumnConstraints hgrow="ALWAYS" fillWidth="true"/>
+                                            <!-- 수치 열: 고정 -->
+                                            <ColumnConstraints minWidth="190" prefWidth="190"
+                                                               halignment="RIGHT"/>
+                                        </columnConstraints>
+
+                                        <!-- CPU -->
+                                        <Label text="CPU"
+                                               style="-fx-text-fill:#888888; -fx-font-size:11px;"
+                                               GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                                        <ProgressBar fx:id="cpuBar" maxWidth="Infinity"
+                                                     prefHeight="14"
+                                                     GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                                        <Label fx:id="cpuLabel" text="—"
+                                               style="-fx-font-family:monospace; -fx-font-size:11px;"
+                                               GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+
+                                        <!-- 메모리 -->
+                                        <Label text="메모리"
+                                               style="-fx-text-fill:#888888; -fx-font-size:11px;"
+                                               GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                                        <ProgressBar fx:id="memBar" maxWidth="Infinity"
+                                                     prefHeight="14"
+                                                     GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                                        <Label fx:id="memLabel" text="—"
+                                               style="-fx-font-family:monospace; -fx-font-size:11px;"
+                                               GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+
+                                        <!-- JVM 힙 -->
+                                        <Label text="JVM 힙"
+                                               style="-fx-text-fill:#888888; -fx-font-size:11px;"
+                                               GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                                        <ProgressBar fx:id="jvmBar" maxWidth="Infinity"
+                                                     prefHeight="14"
+                                                     GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                                        <Label fx:id="jvmLabel" text="—"
+                                               style="-fx-font-family:monospace; -fx-font-size:11px;"
+                                               GridPane.columnIndex="2" GridPane.rowIndex="2"/>
+                                    </GridPane>
+
+                                    <!-- ===== 서비스 카드 목록 ===== -->
+                                    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS"
+                                                style="-fx-background-color:transparent;">
+                                        <FlowPane fx:id="dashboardCardPane"
+                                                  hgap="14" vgap="14"
+                                                  style="-fx-padding: 18;"/>
+                                    </ScrollPane>
+                                </VBox>
+                            </center>
+                        </BorderPane>
+
+                        <!-- ===== 서비스 상세 (서비스 선택 시 표시) ===== -->
+                        <TabPane fx:id="detailTabPane"
+                                 tabClosingPolicy="UNAVAILABLE"
+                                 visible="false" managed="false">
+
+                            <!-- 개요 탭 -->
+                            <Tab text="개요">
+                                <ScrollPane fitToWidth="true" fitToHeight="false">
+                                    <VBox spacing="14" style="-fx-padding: 18;">
+                                        <GridPane hgap="20" vgap="10">
+                                            <columnConstraints>
+                                                <ColumnConstraints minWidth="80" prefWidth="90"/>
+                                                <ColumnConstraints hgrow="ALWAYS"/>
+                                            </columnConstraints>
+                                            <Label text="PID"    style="-fx-text-fill:#888888;" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                                            <Label fx:id="pidLabel"    text="-"  GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                                            <Label text="포트"   style="-fx-text-fill:#888888;" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                                            <Label fx:id="portLabel"   text="-"  GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                                            <Label text="업타임" style="-fx-text-fill:#888888;" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                                            <Label fx:id="uptimeLabel" text="-"  GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+                                        </GridPane>
+                                        <Separator/>
+                                        <HBox spacing="10">
+                                            <Button fx:id="startBtn"   text="▶  시작"   onAction="#onStart"   prefWidth="90"
+                                                    style="-fx-background-color:#2d5a2d; -fx-text-fill:#88dd88;"/>
+                                            <Button fx:id="stopBtn"    text="■  중지"   onAction="#onStop"    prefWidth="90"
+                                                    style="-fx-background-color:#5a2d2d; -fx-text-fill:#dd8888;"/>
+                                            <Button fx:id="restartBtn" text="↺  재시작" onAction="#onRestart" prefWidth="90"/>
+                                        </HBox>
+                                    </VBox>
+                                </ScrollPane>
+                            </Tab>
+
+                            <!-- 로그 탭 -->
+                            <Tab text="로그">
+                                <VBox spacing="6" style="-fx-padding: 8;">
+                                    <HBox spacing="8" alignment="CENTER_LEFT">
+                                        <TextField fx:id="filterField" promptText="필터..."
+                                                   prefWidth="180" onAction="#onFilter"/>
+                                        <CheckBox fx:id="autoScrollCheck" text="자동 스크롤" selected="true"/>
+                                        <Button text="지우기" onAction="#onClear"/>
+                                    </HBox>
+                                    <TextArea fx:id="logArea" VBox.vgrow="ALWAYS"
+                                              editable="false" wrapText="false"
+                                              style="-fx-font-family:'Consolas','Courier New',monospace;
+                                                     -fx-font-size:12px;
+                                                     -fx-background-color:#1a1a2e;
+                                                     -fx-text-fill:#cccccc;"
+                                              prefHeight="400"/>
+                                </VBox>
+                            </Tab>
+
+                            <!-- 설정 탭 -->
+                            <Tab text="설정">
+                                <ScrollPane fitToWidth="true">
+                                    <VBox spacing="12" style="-fx-padding: 16;">
+                                        <Label text="실행 인수"   style="-fx-font-weight:bold; -fx-font-size:14px;"/>
+                                        <VBox fx:id="argsContainer" spacing="4"/>
+                                        <Separator/>
+                                        <Label text="환경 변수"   style="-fx-font-weight:bold; -fx-font-size:14px;"/>
+                                        <VBox fx:id="envVarsContainer" spacing="4"/>
+                                        <HBox spacing="8">
+                                            <Button text="+ 환경변수 추가" onAction="#onAddEnvVar"/>
+                                            <Button text="💾 저장" onAction="#onSaveConfig"
+                                                    style="-fx-background-color:#336699; -fx-text-fill:white;"/>
+                                        </HBox>
+                                    </VBox>
+                                </ScrollPane>
+                            </Tab>
+
+                            <!-- 설치 탭 -->
+                            <Tab text="설치">
+                                <VBox spacing="12" style="-fx-padding: 16;">
+                                    <!-- 경로 정보 -->
+                                    <GridPane hgap="10" vgap="6">
+                                        <columnConstraints>
+                                            <ColumnConstraints minWidth="80" prefWidth="90"/>
+                                            <ColumnConstraints hgrow="ALWAYS"/>
+                                        </columnConstraints>
+                                        <Label text="설치 경로" style="-fx-text-fill:#888888;" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                                        <Label fx:id="installDirLabel" text="-" wrapText="true"
+                                               style="-fx-font-family:'Consolas','Courier New',monospace; -fx-font-size:12px;"
+                                               GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+                                        <Label text="작업 경로" style="-fx-text-fill:#888888;" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                                        <Label fx:id="workingDirLabel" text="-" wrapText="true"
+                                               style="-fx-font-family:'Consolas','Courier New',monospace; -fx-font-size:12px;"
+                                               GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+                                    </GridPane>
+                                    <Separator/>
+                                    <HBox spacing="10">
+                                        <Button fx:id="installBtn"   text="⬇ 설치" onAction="#onInstall"   prefWidth="90"
+                                                style="-fx-background-color:#336699; -fx-text-fill:white;"/>
+                                        <Button fx:id="uninstallBtn" text="✕ 제거" onAction="#onUninstall" prefWidth="90"
+                                                style="-fx-background-color:#663333; -fx-text-fill:white;"/>
+                                    </HBox>
+                                    <ProgressBar fx:id="progressBar" maxWidth="Infinity" progress="0"/>
+                                    <TextArea fx:id="installLogArea" VBox.vgrow="ALWAYS"
+                                              editable="false" wrapText="true"
+                                              style="-fx-font-family:'Consolas','Courier New',monospace;
+                                                     -fx-font-size:12px;"
+                                              prefHeight="380"/>
+                                </VBox>
+                            </Tab>
+
+                        </TabPane>
+                    </StackPane>
+                </center>
+            </BorderPane>
+        </SplitPane>
+    </center>
+
+    <!-- ===== BOTTOM STATUS BAR ===== -->
+    <bottom>
+        <HBox style="-fx-padding: 4 12;
+                     -fx-border-color: #2a2a3a;
+                     -fx-border-width: 1 0 0 0;
+                     -fx-background-color: #1e1e2e;">
+            <Label fx:id="statusBarLabel"
+                   text="서비스: 0개  |  실행중: 0개"
+                   style="-fx-text-fill:#666688; -fx-font-size:11px;"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>

@@ -1,0 +1,82 @@
+{
+  "id" : "builtin-swagger-mcp-server",
+  "name" : "Swagger MCP Server",
+  "description" : "OpenAPI(Swagger) 문서를 읽어 MCP 도구로 변환하는 서버. Claude Code 등 MCP 클라이언트에서 REST API를 직접 호출할 수 있게 해준다.",
+  "builtin" : true,
+  "runtimeType" : "JAVA",
+  "startCommand" : "java -jar swagger-mcp-server.jar",
+  "installDir" : "${user.home}/llm-services/swagger-mcp",
+  "port" : 17070,
+  "healthCheckPath" : "/actuator/health",
+  "installCommands" : [],
+  "argSpecs" : [ {
+    "name" : "server.port",
+    "flag" : "--server.port=",
+    "type" : "INTEGER",
+    "defaultValue" : "17070",
+    "description" : "MCP 서버 HTTP 포트",
+    "enabled" : true
+  }, {
+    "name" : "api-base-url",
+    "flag" : "--infobip.openapi.mcp.api-base-url=",
+    "type" : "STRING",
+    "defaultValue" : "http://localhost:20301",
+    "description" : "실제 API 요청이 전달될 백엔드 서버 URL (필수)",
+    "enabled" : true
+  }, {
+    "name" : "open-api-url",
+    "flag" : "--infobip.openapi.mcp.open-api-url=",
+    "type" : "STRING",
+    "defaultValue" : "http://localhost:20301/v3/api-docs",
+    "description" : "OpenAPI 문서 URL 또는 파일 경로 (필수). Swagger 2.x는 /v2/api-docs",
+    "enabled" : true
+  }, {
+    "name" : "auth.header-name",
+    "flag" : "--swagger.auth.header-name=",
+    "type" : "STRING",
+    "defaultValue" : "",
+    "description" : "인증 헤더 이름 (예: Authorization). 비워 두면 인증 비활성화.",
+    "enabled" : false
+  }, {
+    "name" : "auth.header-value",
+    "flag" : "--swagger.auth.header-value=",
+    "type" : "STRING",
+    "defaultValue" : "",
+    "description" : "인증 헤더 값 (예: Bearer eyJhbGc...)",
+    "enabled" : false
+  }, {
+    "name" : "embedding.provider",
+    "flag" : "--embedding.provider=",
+    "type" : "SELECT",
+    "defaultValue" : "tei",
+    "description" : "임베딩 모델 종류",
+    "options" : [ "tei", "local", "ollama" ],
+    "enabled" : false
+  }, {
+    "name" : "vector-store.provider",
+    "flag" : "--vector-store.provider=",
+    "type" : "SELECT",
+    "defaultValue" : "memory",
+    "description" : "벡터 저장소 종류. memory=재시작 시 재인덱싱, chroma/pgvector=영속.",
+    "options" : [ "memory", "chroma", "pgvector" ],
+    "enabled" : false
+  }, {
+    "name" : "reindex-on-startup",
+    "flag" : "--indexing.reindex-on-startup=",
+    "type" : "SELECT",
+    "defaultValue" : "true",
+    "description" : "시작 시 API 툴 재인덱싱 여부. chroma/pgvector 사용 시 false 권장.",
+    "options" : [ "true", "false" ],
+    "enabled" : false
+  }, {
+    "name" : "codebase-memory.enabled",
+    "flag" : "--codebase-memory.enabled=",
+    "type" : "SELECT",
+    "defaultValue" : "false",
+    "description" : "Codebase Memory MCP 연동 활성화 (codebase-memory-mcp.exe 별도 기동 필요)",
+    "options" : [ "false", "true" ],
+    "enabled" : false
+  } ],
+  "argValues" : {},
+  "envVars" : {}
+}

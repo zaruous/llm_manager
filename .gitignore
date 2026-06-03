@@ -1,0 +1,25 @@
+# Build output
+build/
+bin/
+out/
+
+# Gradle
+.gradle/
+gradle-app.setting
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.iws
+
+# HotswapAgent (개발 전용, 배포 불포함)
+lib/hotswap/
+
+# 런타임 생성 파일
+docs/schema/
+
+# OS
+.DS_Store
+Thumbs.db

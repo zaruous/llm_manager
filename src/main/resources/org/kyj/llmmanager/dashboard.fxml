@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="org.kyj.llmmanager.ui.controller.DashboardController"
+            prefWidth="860" prefHeight="540">
+
+    <!-- ===== HEADER ===== -->
+    <top>
+        <VBox style="-fx-padding: 16 20 12 20;
+                     -fx-border-color: #2a2a3a;
+                     -fx-border-width: 0 0 1 0;">
+            <Label text="대시보드"
+                   style="-fx-font-size: 18px; -fx-font-weight: bold;"/>
+            <HBox spacing="20" style="-fx-padding: 6 0 0 0;">
+                <Label fx:id="totalLabel"   text="전체 0개"
+                       style="-fx-text-fill: #888888; -fx-font-size: 12px;"/>
+                <Label fx:id="runningLabel" text="실행 중 0개"
+                       style="-fx-text-fill: #44BB44; -fx-font-size: 12px; -fx-font-weight: bold;"/>
+                <Label fx:id="stoppedLabel" text="중지 0개"
+                       style="-fx-text-fill: #888888; -fx-font-size: 12px;"/>
+                <Label fx:id="errorLabel"   text="오류 0개"
+                       style="-fx-text-fill: #EE4444; -fx-font-size: 12px;"/>
+            </HBox>
+        </VBox>
+    </top>
+
+    <!-- ===== CARD GRID ===== -->
+    <center>
+        <ScrollPane fitToWidth="true" style="-fx-padding: 0;">
+            <FlowPane fx:id="cardPane"
+                      hgap="14" vgap="14"
+                      style="-fx-padding: 20;">
+            </FlowPane>
+        </ScrollPane>
+    </center>
+
+    <!-- ===== BOTTOM BAR ===== -->
+    <bottom>
+        <HBox alignment="CENTER_RIGHT" spacing="10"
+              style="-fx-padding: 8 16;
+                     -fx-border-color: #2a2a3a;
+                     -fx-border-width: 1 0 0 0;">
+            <Button text="전체 시작" onAction="#onStartAll"
+                    style="-fx-background-color: #2d5a2d; -fx-text-fill: #88dd88;"/>
+            <Button text="전체 중지" onAction="#onStopAll"
+                    style="-fx-background-color: #5a2d2d; -fx-text-fill: #dd8888;"/>
+            <Button text="새로고침"  onAction="#onRefresh"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>

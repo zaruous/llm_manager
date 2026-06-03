@@ -1,0 +1,147 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+group = 'org.kyj'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+javafx {
+    version = '21.0.2'
+    modules = ['javafx.controls', 'javafx.fxml', 'javafx.web']
+}
+
+dependencies {
+    implementation 'io.github.mkpaz:atlantafx-base:2.0.1'
+    implementation 'org.controlsfx:controlsfx:11.2.1'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.1'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.16.1'
+    implementation 'org.slf4j:slf4j-api:2.0.12'
+    implementation 'ch.qos.logback:logback-classic:1.5.3'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.16.1'
+    implementation 'org.apache.groovy:groovy:4.0.21'
+    implementation 'org.apache.groovy:groovy-jsr223:4.0.21'
+    // 내장 REST API 서버 + Swagger UI
+    implementation 'io.javalin:javalin:6.3.0'
+    // 시스템 리소스 모니터링 (CPU·메모리·OS 정보)
+    implementation 'com.github.oshi:oshi-core:6.6.1'
+}
+
+application {
+    mainClass = 'org.kyj.llmmanager.LlmManagerApp'
+}
+
+// 배포판 시작 스크립트: JavaFX JAR 만 --module-path 에 분리
+startScripts {
+    doLast {
+        def javafxJarNames = configurations.runtimeClasspath.files
+            .findAll { it.name.startsWith('javafx-') }
+            .collect { it.name }
+
+        // Windows .bat
+        def bat = windowsScript.text
+        def mpWin = javafxJarNames.collect { '%APP_HOME%\\lib\\' + it }.join(';')
+        bat = bat.replace(
+            'set DEFAULT_JVM_OPTS=',
+            "set DEFAULT_JVM_OPTS=--module-path \"${mpWin}\" --add-modules javafx.controls,javafx.fxml,javafx.graphics,javafx.base"
+        )
+        windowsScript.text = bat
+
+        // Unix shell
+        def sh = unixScript.text
+        def mpUnix = javafxJarNames.collect { '$APP_HOME/lib/' + it }.join(':')
+        sh = sh.replace(
+            'DEFAULT_JVM_OPTS=""',
+            "DEFAULT_JVM_OPTS=\"--module-path \\\"${mpUnix}\\\" --add-modules javafx.controls,javafx.fxml,javafx.graphics,javafx.base\""
+        )
+        unixScript.text = sh
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 개발 모드: DCEVM + HotswapAgent + FXML 파일 감시
+// 사용법: ./gradlew runDev
+//   (최초 1회) ./gradlew downloadHotswapAgent  →  lib/hotswap/hotswap-agent.jar 다운로드
+// ──────────────────────────────────────────────────────────────
+
+tasks.register('downloadHotswapAgent') {
+    group = 'development'
+    description = 'HotswapAgent JAR을 lib/hotswap/ 에 다운로드합니다'
+    def agentFile = file('lib/hotswap/hotswap-agent.jar')
+    outputs.file agentFile
+    doLast {
+        if (agentFile.exists()) {
+            println "이미 존재합니다: ${agentFile}"
+            return
+        }
+        agentFile.parentFile.mkdirs()
+        def url = 'https://github.com/HotswapProjects/HotswapAgent/releases/download/2.0.1/hotswap-agent-2.0.1-all.jar'
+        println "다운로드 중: ${url}"
+        new URL(url).withInputStream { is -> agentFile.bytes = is.bytes }
+        println "완료: ${agentFile}"
+    }
+}
+
+// run 태스크에 개발 모드 JVM 옵션 추가 (./gradlew run -Pdev 또는 ./gradlew runDev)
+run {
+    if (project.hasProperty('dev') || project.hasProperty('runDev')) {
+        def hotswapJar = file('lib/hotswap/hotswap-agent.jar')
+        systemProperty 'llm.dev', 'true'
+        // 표준 JDK에서 JBR 전용 옵션을 무시하도록 먼저 선언
+        jvmArgs '-XX:+IgnoreUnrecognizedVMOptions'
+        // DCEVM / JetBrains Runtime 전용: 전체 클래스 재정의 활성화
+        jvmArgs '-XX:+AllowEnhancedClassRedefinition',
+                '-XX:HotswapAgent=fatjar'
+        if (hotswapJar.exists()) {
+            jvmArgs "-javaagent:${hotswapJar.absolutePath}"
+            println "[DEV] HotswapAgent 활성화: ${hotswapJar}"
+        } else {
+            println "[DEV] hotswap-agent.jar 없음 → ./gradlew downloadHotswapAgent 실행 후 재시도"
+        }
+    }
+}
+
+tasks.register('runDev') {
+    group = 'application'
+    description = '개발 모드로 실행 (DCEVM + HotswapAgent + FXML 핫 리로드)'
+    doFirst { project.ext.runDev = true }
+    finalizedBy 'run'
+}
+
+// 배포판에 기본 제공 서비스 정의 파일 포함
+distributions {
+    main {
+        contents {
+            from('lib/def') {
+                into('lib/def')
+            }
+        }
+    }
+}
+
+// 독립 실행 fat JAR (gradle fatJar 로 빌드)
+tasks.register('fatJar', Jar) {
+    group = 'build'
+    description = 'Builds a standalone fat JAR (for direct java -jar execution)'
+    archiveClassifier.set('all')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes 'Main-Class': 'org.kyj.llmmanager.LlmManagerApp'
+    }
+    from sourceSets.main.output
+    from {
+        configurations.runtimeClasspath.collect {
+            it.isDirectory() ? it : zipTree(it)
+        }
+    }
+}
