@@ -17,6 +17,9 @@ gradle-app.setting
 # HotswapAgent (개발 전용, 배포 불포함)
 lib/hotswap/
 
+# 번들 JAR — 100MB 초과로 Git LFS 없이 GitHub 업로드 불가
+lib/*.jar
+
 # 런타임 생성 파일
 docs/schema/
 
