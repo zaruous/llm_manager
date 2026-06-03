@@ -36,7 +36,7 @@
 
 ## 스크린샷
 
-> `docs/` 디렉토리에 스크린샷을 추가하세요.
+![LLM Manager 메인 화면](https://raw.githubusercontent.com/zaruous/llm_manager/master/docs/llm-manager/MAIN.png)
 
 ---
 
