@@ -30,6 +30,8 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -168,6 +170,8 @@ public class MainController implements Initializable {
     private final Map<String, Control> argControls = new HashMap<>();
     /** 1초 간격으로 업타임 레이블을 갱신하는 스케줄러 */
     private ScheduledExecutorService uptimeScheduler;
+    /** 로그 탭 TextArea에 현재 표시 중인 행 수. 5000행 초과 시 앞 1000행을 제거한다. */
+    private int logLineCount = 0;
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
@@ -352,6 +356,7 @@ public class MainController implements Initializable {
     private void refreshLogs() {
         if (selectedInstance == null) return;
         logArea.clear();
+        logLineCount = 0;
         for (LogEntry entry : selectedInstance.getLogs()) {
             appendLogEntry(entry);
         }
@@ -371,6 +376,21 @@ public class MainController implements Initializable {
         if (filter != null && !filter.isBlank()
                 && !entry.getMessage().contains(filter)) return;
         logArea.appendText("[" + entry.getTimeString() + "] " + entry.getMessage() + "\n");
+        logLineCount++;
+
+        // 5000행 초과 시 앞 1000행 제거 — TextArea 메모리 과다 사용 방지
+        if (logLineCount > 5000) {
+            String text = logArea.getText();
+            int idx = 0;
+            for (int i = 0; i < 1000; i++) {
+                int next = text.indexOf('\n', idx);
+                if (next == -1) { idx = text.length(); break; }
+                idx = next + 1;
+            }
+            logArea.setText(text.substring(idx));
+            logLineCount -= 1000;
+        }
+
         if (autoScrollCheck.isSelected()) {
             logArea.setScrollTop(Double.MAX_VALUE);
         }
@@ -379,6 +399,7 @@ public class MainController implements Initializable {
     @FXML
     private void onClear() {
         logArea.clear();
+        logLineCount = 0;
     }
 
     @FXML
@@ -400,7 +421,8 @@ public class MainController implements Initializable {
     }
 
     /**
-     * ArgSpec 목록을 기반으로 타입별 입력 컨트롤(TextField/CheckBox/ComboBox)을 설정 탭에 동적으로 생성한다.
+     * ArgSpec 목록을 GridPane으로 배치한다.
+     * 0열(라벨) / 1열(입력 컨트롤) / 2열(설명)이 모든 행에 걸쳐 동일 너비로 정렬된다.
      *
      * @param def 인수 명세를 포함하는 ServiceDefinition
      */
@@ -408,11 +430,38 @@ public class MainController implements Initializable {
         argsContainer.getChildren().clear();
         argControls.clear();
 
+        if (def.getArgSpecs().isEmpty()) return;
+
+        GridPane grid = new GridPane();
+        grid.setHgap(12);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(4, 0, 4, 0));
+
+        // 0열: 라벨 — 고정 너비
+        ColumnConstraints labelCol = new ColumnConstraints();
+        labelCol.setMinWidth(140);
+        labelCol.setPrefWidth(140);
+        labelCol.setMaxWidth(140);
+        labelCol.setHgrow(Priority.NEVER);
+
+        // 1열: 입력 컨트롤 — 고정 너비
+        ColumnConstraints controlCol = new ColumnConstraints();
+        controlCol.setMinWidth(200);
+        controlCol.setPrefWidth(200);
+        controlCol.setMaxWidth(200);
+        controlCol.setHgrow(Priority.NEVER);
+
+        // 2열: 설명 — 남은 공간을 채움
+        ColumnConstraints descCol = new ColumnConstraints();
+        descCol.setMinWidth(0);
+        descCol.setHgrow(Priority.ALWAYS);
+        descCol.setFillWidth(true);
+
+        grid.getColumnConstraints().addAll(labelCol, controlCol, descCol);
+
+        int row = 0;
         for (ArgSpec spec : def.getArgSpecs()) {
-            HBox row = new HBox(10);
-            row.setPadding(new Insets(4, 0, 4, 0));
             Label label = new Label(spec.getName() + ":");
-            label.setMinWidth(120);
             label.setStyle("-fx-text-fill: #aaaaaa;");
 
             String currentVal = def.getArgValues().getOrDefault(
@@ -427,27 +476,31 @@ public class MainController implements Initializable {
                 ComboBox<String> combo = new ComboBox<>();
                 combo.getItems().addAll(spec.getOptions());
                 combo.setValue(currentVal);
-                combo.setPrefWidth(200);
+                combo.setMaxWidth(Double.MAX_VALUE);
                 control = combo;
             } else {
                 TextField tf = new TextField(currentVal != null ? currentVal : "");
-                tf.setPrefWidth(200);
+                tf.setMaxWidth(Double.MAX_VALUE);
                 if (spec.getDefaultValue() != null)
                     tf.setPromptText(spec.getDefaultValue());
                 control = tf;
             }
 
             argControls.put(spec.getName(), control);
-            row.getChildren().addAll(label, control);
+            grid.add(label, 0, row);
+            grid.add(control, 1, row);
 
             if (spec.getDescription() != null) {
                 Label desc = new Label(spec.getDescription());
                 desc.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
-                row.getChildren().add(desc);
+                desc.setWrapText(true);
+                grid.add(desc, 2, row);
             }
 
-            argsContainer.getChildren().add(row);
+            row++;
         }
+
+        argsContainer.getChildren().add(grid);
     }
 
     /**
@@ -1016,12 +1069,46 @@ public class MainController implements Initializable {
             serviceListView.getSelectionModel().select(inst);
         });
 
+        // ── 메모리 ProgressBar + 수치 레이블 ──
+        ProgressBar memBar = new ProgressBar(0);
+        memBar.setMaxWidth(Double.MAX_VALUE);
+        memBar.setPrefHeight(8);
+        memBar.setStyle("-fx-accent: #5588bb;");
+
+        Label memDetailLabel = new Label();
+        memDetailLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #8888bb;");
+
+        Canvas sparkline = new Canvas(182, 44);
+
+        VBox memSection = new VBox(3, memBar, memDetailLabel, sparkline);
+        // 항상 공간 유지 — 미실행 시 플레이스홀더로 표시
+        resetCardMem(memBar, memDetailLabel, sparkline);
+
+        Runnable updateMem = () -> {
+            long rss     = inst.getMemoryBytes();
+            long virtual = inst.getVirtualMemoryBytes();
+            if (rss > 0 && inst.getStatus() == ServiceStatus.RUNNING) {
+                memBar.setProgress(virtual > 0 ? (double) rss / virtual : 0);
+                memBar.setStyle("-fx-accent: #5588bb;");
+                memDetailLabel.setText(formatCardMemory(rss) + " / " + formatCardMemory(virtual));
+                memDetailLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #8888bb;");
+                drawCardSparkline(sparkline, inst.getMemoryHistory());
+            } else {
+                resetCardMem(memBar, memDetailLabel, sparkline);
+            }
+        };
+        inst.memoryBytesProperty().addListener((obs, o, n) -> updateMem.run());
+
         // statusProperty 구독 → 카드 실시간 갱신
         inst.statusProperty().addListener((obs, old, newStatus) -> {
             applyCardDotColor(dot, newStatus);
             statusLabel.setText(newStatus.getLabel());
             actionBtn.setText(cardActionLabel(newStatus));
             actionBtn.setStyle(cardActionStyle(newStatus));
+            if (newStatus != ServiceStatus.RUNNING) {
+                inst.setMemoryBytes(0);
+                resetCardMem(memBar, memDetailLabel, sparkline);
+            }
             updateDashboardSummary(ctx.getProcessManager().getAllInstances());
         });
 
@@ -1029,13 +1116,16 @@ public class MainController implements Initializable {
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
 
-        VBox card = new VBox(8, nameRow, statusLabel, portLabel, descLabel,
+        VBox card = new VBox(8, nameRow, statusLabel, portLabel, memSection, descLabel,
                 spacer, new Separator(), actionBtn, detailBtn);
         card.setPadding(new Insets(14));
-        card.setPrefWidth(210);
-        card.setMaxWidth(210);
-        card.setPrefHeight(210);  // 카드 높이 고정
+        card.setPrefWidth(230);
+        card.setMaxWidth(230);
         card.getStyleClass().add("service-card");
+
+        // 카드 클릭 시 메모리 상세 팝업
+        card.setOnMouseClicked(e -> showCardMemoryPopup(inst));
+        card.setStyle(card.getStyle() + "-fx-cursor: hand;");
 
         return card;
     }
@@ -1053,6 +1143,109 @@ public class MainController implements Initializable {
         return status == ServiceStatus.RUNNING
                 ? "-fx-background-color:#5a2d2d; -fx-text-fill:#dd8888; -fx-background-radius:4;"
                 : "-fx-background-color:#2d5a2d; -fx-text-fill:#88dd88; -fx-background-radius:4;";
+    }
+
+    /** 메모리 섹션을 미실행 플레이스홀더 상태로 초기화한다. */
+    private void resetCardMem(ProgressBar bar, Label lbl, Canvas canvas) {
+        bar.setProgress(0);
+        bar.setStyle("-fx-accent: #3a3a4a;");
+        lbl.setText("서비스 미실행");
+        lbl.setStyle("-fx-font-size: 10px; -fx-text-fill: #444455;");
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+        gc.setStroke(Color.web("#2a2a3a"));
+        gc.setLineWidth(1);
+        gc.setLineDashes(4);
+        gc.strokeLine(0, canvas.getHeight() / 2, canvas.getWidth(), canvas.getHeight() / 2);
+        gc.setLineDashes(0);
+    }
+
+    private String formatCardMemory(long bytes) {
+        if (bytes <= 0) return "0 MB";
+        if (bytes >= 1024L * 1024 * 1024) return String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024));
+        if (bytes >= 1024L * 1024)        return String.format("%.0f MB", bytes / (1024.0 * 1024));
+        return String.format("%.0f KB", bytes / 1024.0);
+    }
+
+    private void drawCardSparkline(Canvas canvas, List<Long> history) {
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        double w = canvas.getWidth(), h = canvas.getHeight();
+        gc.clearRect(0, 0, w, h);
+        if (history.size() < 2) return;
+        long max = history.stream().mapToLong(Long::longValue).max().orElse(1);
+        if (max == 0) return;
+        double xStep = w / (history.size() - 1);
+        gc.setFill(Color.web("#5588bb", 0.25));
+        gc.beginPath(); gc.moveTo(0, h);
+        for (int i = 0; i < history.size(); i++) {
+            gc.lineTo(i * xStep, h - h * 0.9 * history.get(i) / max);
+        }
+        gc.lineTo(w, h); gc.closePath(); gc.fill();
+        gc.setStroke(Color.web("#5588bb", 0.85)); gc.setLineWidth(1.5);
+        gc.beginPath();
+        for (int i = 0; i < history.size(); i++) {
+            double x = i * xStep, y = h - h * 0.9 * history.get(i) / max;
+            if (i == 0) gc.moveTo(x, y); else gc.lineTo(x, y);
+        }
+        gc.stroke();
+        int last = history.size() - 1;
+        double lx = last * xStep, ly = h - h * 0.9 * history.get(last) / max;
+        gc.setFill(Color.web("#88bbee")); gc.fillOval(lx - 3, ly - 3, 6, 6);
+    }
+
+    /**
+     * 카드 클릭 시 서비스 메모리 이력을 확대 그래프로 보여주는 팝업을 연다.
+     *
+     * @param inst 조회할 서비스 인스턴스
+     */
+    private void showCardMemoryPopup(ServiceInstance inst) {
+        if (inst.getStatus() != ServiceStatus.RUNNING) return;
+        Stage popup = new Stage();
+        popup.setTitle(inst.getDefinition().getName() + " — 메모리 모니터링");
+        popup.initModality(Modality.NONE);
+
+        long rss     = inst.getMemoryBytes();
+        long virtual = inst.getVirtualMemoryBytes();
+
+        Label titleLbl = new Label(inst.getDefinition().getName());
+        titleLbl.setStyle("-fx-font-size: 15px; -fx-font-weight: bold;");
+        Label rssLbl = new Label("RSS(물리): " + formatCardMemory(rss));
+        rssLbl.setStyle("-fx-font-size: 13px; -fx-text-fill: #88bbee;");
+        Label totalLbl = new Label("가상 할당량: " + formatCardMemory(virtual));
+        totalLbl.setStyle("-fx-font-size: 11px; -fx-text-fill: #888888;");
+
+        ProgressBar bar = new ProgressBar(virtual > 0 ? (double) rss / virtual : 0);
+        bar.setMaxWidth(Double.MAX_VALUE); bar.setPrefHeight(12);
+        bar.setStyle("-fx-accent: #5588bb;");
+
+        Label pctLbl = new Label(virtual > 0 ? String.format("%.1f%% 상주 중", 100.0 * rss / virtual) : "");
+        pctLbl.setStyle("-fx-font-size: 11px; -fx-text-fill: #888888;");
+
+        Canvas bigChart = new Canvas(460, 160);
+        drawCardSparkline(bigChart, inst.getMemoryHistory());
+
+        Label hintLbl = new Label("최근 " + inst.getMemoryHistory().size() + "회 샘플 (10초 간격)");
+        hintLbl.setStyle("-fx-font-size: 10px; -fx-text-fill: #555566;");
+
+        VBox root = new VBox(10, titleLbl, rssLbl, totalLbl, bar, pctLbl,
+                new Separator(), bigChart, hintLbl);
+        root.setPadding(new Insets(20));
+        root.setStyle("-fx-background-color: #1e1e2e;");
+
+        inst.memoryBytesProperty().addListener((obs, o, n) -> {
+            if (!popup.isShowing()) return;
+            long r = n.longValue();
+            long v = inst.getVirtualMemoryBytes();
+            rssLbl.setText("RSS(물리): " + formatCardMemory(r));
+            totalLbl.setText("가상 할당량: " + formatCardMemory(v));
+            bar.setProgress(v > 0 ? (double) r / v : 0);
+            pctLbl.setText(v > 0 ? String.format("%.1f%% 상주 중", 100.0 * r / v) : "");
+            hintLbl.setText("최근 " + inst.getMemoryHistory().size() + "회 샘플 (10초 간격)");
+            drawCardSparkline(bigChart, inst.getMemoryHistory());
+        });
+
+        popup.setScene(new Scene(root, 500, 380));
+        popup.show();
     }
 
     /** 대시보드 상단 요약 레이블을 갱신한다. */

@@ -10,27 +10,31 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 ## 레이어 구조
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      UI Layer                           │
-│  MainController  DashboardController  각종 Dialog/Cell  │
-├─────────────────────────────────────────────────────────┤
-│                   AppContext (싱글톤)                    │
-│         모든 서비스 객체를 생성·보관·UI에 제공           │
-├──────────────┬──────────────┬───────────────────────────┤
-│  Process     │  Persistence │  Support Services         │
-│  ProcessManager             │  LogService               │
-│  HealthMonitor              │  InstallationService      │
-│              │ ServiceRegistry (services.json)          │
-│              │ AppSettingsRepository (settings.json)    │
-│              │ ProjectRegistry (projects.json)          │
-│              │  SystemMonitorService                    │
-│              │  EmbeddedApiServer                      │
-│              │  LlmSkillInstaller                      │
-├──────────────┴──────────────┴───────────────────────────┤
-│                     Model Layer                         │
-│  ServiceDefinition  ServiceInstance  ArgSpec            │
-│  RuntimeType  ServiceStatus  AppSettings  SkillPack     │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                          UI Layer                               │
+│  MainController  DashboardController  LlmSkillsController       │
+│  각종 Dialog / Cell                                             │
+├─────────────────────────────────────────────────────────────────┤
+│                    AppContext (싱글톤)                           │
+│          모든 서비스 객체를 생성·보관·UI에 제공                  │
+├──────────────┬───────────────────┬──────────────────────────────┤
+│  Process     │  Persistence      │  Support Services            │
+│  ProcessManager                  │  LogService                  │
+│  HealthMonitor                   │  InstallationService         │
+│  PidFileManager                  │  LlmSkillInstaller           │
+│              │ ServiceRegistry (services.json)                  │
+│              │ AppSettingsRepository (settings.json)            │
+│              │ ProjectRegistry (projects.json)                  │
+│              │  SystemMonitorService                            │
+│              │  EmbeddedApiServer                               │
+│              │  ServiceCustomizer (Groovy)                      │
+│              │  ServicePackLoader (YAML)                        │
+├──────────────┴───────────────────┴──────────────────────────────┤
+│                        Model Layer                              │
+│  ServiceDefinition  ServiceInstance  ArgSpec                    │
+│  RuntimeType  ServiceStatus  AppSettings  SkillPack             │
+│  LlmTool  ProjectConfig  SkillFile                              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -39,7 +43,7 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 
 ```
 main()
-  ├─ AppConfigLoader.parseArgs()     ← CLI 인수 파싱 (dev 모드 플래그 등)
+  ├─ AppConfigLoader.parseArgs()     ← CLI 인수 파싱 (--key=value 형식)
   ├─ AWT Toolkit 초기화             ← SystemTray 안정성 확보
   └─ JavaFX launch()
         │
@@ -48,11 +52,13 @@ LlmManagerApp.start()
   ├─ NordDark 테마 적용
   ├─ AppContext.init()
   │     ├─ AppSettingsRepository.load()   ← settings.json
+  │     ├─ AppConfigLoader.applyCli()     ← CLI 오버라이드 (최우선 순위)
   │     ├─ ServiceRegistry.load()         ← services.json
   │     ├─ BuiltinServiceLoader 생성      ← lib/def/*.json (지연 로드)
   │     ├─ LogService / ProcessManager 생성
+  │     ├─ PidFileManager 생성            ← PID 파일 기반 고아 프로세스 추적
   │     ├─ InstallationService 생성
-  │     ├─ HealthMonitor.start()          ← 30초 주기 HTTP 헬스체크
+  │     ├─ HealthMonitor.start()          ← intervalSeconds 주기 헬스체크 (기본 10초)
   │     ├─ LlmSkillInstaller / ProjectRegistry.load()
   │     ├─ SystemTrayManager 설치
   │     ├─ SystemMonitorService.start()   ← CPU·메모리 수집
@@ -85,11 +91,25 @@ LlmManagerApp.start()
 `add()` / `remove()` / `update()` 호출 시마다 즉시 파일에 저장한다.
 
 ### HealthMonitor
-30초 주기로 등록된 서비스의 `healthCheckPath`에 HTTP GET을 보내 응답 여부로 상태를 갱신한다.
+설정된 주기(기본 10초, 1~10초 범위)로 등록된 서비스의 `healthCheckPath`에 HTTP GET을 보내 응답 여부로 상태를 갱신한다.  
+앱 시작 후 최초 1회에 한해 PID 파일을 스캔해 고아 프로세스(앱 재시작 전 실행 중이던 서비스)를 감지하고 RUNNING 상태로 복원한다.  
+OSHI를 통해 각 RUNNING 서비스의 RSS·가상 메모리도 주기적으로 수집한다.
 
 ### LogService
 `ProcessBuilder`의 stdout/stderr 스트림을 별도 스레드에서 읽어 `ServiceInstance.logs`에 추가한다.  
 로그 항목은 `ObservableList<LogEntry>`로 UI와 실시간 바인딩된다.
+
+### PidFileManager
+서비스 시작 시 PID를 파일로 저장하고 종료 시 삭제한다.  
+`HealthMonitor`가 첫 번째 체크 시 이 파일을 읽어 앱 재시작 후에도 실행 중인 서비스를 인식한다.
+
+### ServiceCustomizer
+Groovy 스크립트를 통해 서비스 정의를 런타임에 수정한다.  
+`AddServiceController`에서 스크립트를 작성·미리보기 후 저장 시 자동 적용된다.
+
+### ServicePackLoader
+YAML 형식의 서비스 팩 파일을 읽어 `ServiceDefinition` 목록으로 변환한다.  
+`AddServiceController`의 "YAML 가져오기" 기능에서 사용한다.
 
 ### EmbeddedApiServer
 Javalin 기반 내장 REST API 서버. 설정에서 활성화 시 기동.  
@@ -110,11 +130,11 @@ OSHI 라이브러리로 CPU 사용률·물리 메모리를 수집한다.
 
 ```
 main.fxml (MainController)
-  ├─ 좌측: ListView<ServiceInstance>  ← 검색 필터 포함
+  ├─ 좌측: ListView<ServiceInstance>  ← 검색 필터 포함, ServiceListCell 렌더링
   ├─ 중앙: dashboardPane (BorderPane)  ← 서비스 미선택 시 기본
   │     ├─ 요약 레이블 (전체/실행중/오류)
-  │     ├─ 시스템 리소스 패널 (CPU/메모리/JVM)
-  │     └─ FlowPane  ← 서비스 카드 목록
+  │     ├─ 시스템 리소스 패널 (CPU/메모리/JVM 게이지)
+  │     └─ FlowPane  ← 서비스 카드 목록 (메모리 바 + Canvas 스파크라인 포함)
   ├─ 중앙: detailTabPane (TabPane)     ← 서비스 선택 시 표시
   │     ├─ 개요 탭  (상태·PID·포트·업타임·시작/중지/재시작)
   │     ├─ 로그 탭  (실시간 로그·필터·자동 스크롤)
@@ -123,10 +143,42 @@ main.fxml (MainController)
   └─ 팝업 다이얼로그
         ├─ BuiltinServicesController  ← builtin 서비스 선택
         ├─ BuiltinServiceSetupDialog  ← builtin 최적화 설정
-        ├─ AddServiceDialog           ← 범용 서비스 추가/수정
+        ├─ AddServiceDialog           ← 서비스 추가/수정 (YAML 가져오기·Groovy 커스터마이징 포함)
         ├─ ServiceDetailDialog        ← 서비스 상세·수정
-        └─ SettingsDialog             ← 앱 설정
+        ├─ SettingsDialog             ← 앱 설정
+        └─ HelpDialog                 ← 도움말
+
+dashboard.fxml (DashboardController)
+  ├─ 서비스 카드 목록 (FlowPane)
+  │     ├─ 상태 점 + 이름 + 상태 텍스트 + 포트
+  │     ├─ 메모리 ProgressBar + 수치 레이블
+  │     └─ Canvas 스파크라인 (최근 20개 RSS 샘플)
+  └─ 전체 시작 / 전체 중지 / 새로고침 버튼
+
+llm-skills.fxml (LlmSkillsController)
+  └─ LLM 스킬(claude/copilot/cursor/gemini) 설치·관리
 ```
+
+---
+
+## 설정 우선순위
+
+```
+CLI 인수 (--key=value)
+  └─▷ settings.json (GUI 저장, ~/.llm-manager/settings.json)
+        └─▷ application.yml (배포 기본값)
+```
+
+주요 CLI 오버라이드 키:
+
+| CLI 키 | 설명 |
+|--------|------|
+| `--api.server.enabled=true` | 내장 API 서버 활성화 |
+| `--api.server.port=9090` | API 서버 포트 |
+| `--runtime.python=python3` | Python 실행 명령어 |
+| `--runtime.java-home=C:\Java\jdk21` | JAVA_HOME |
+| `--install.base=D:\llm-services` | 서비스 기본 설치 루트 |
+| `--monitor.health-check-interval=5` | 헬스체크 주기 (초) |
 
 ---
 
@@ -139,21 +191,21 @@ main.fxml (MainController)
 | `stop-{name}` | 프로세스 종료 처리 (taskkill / destroy) |
 | `log-stdout-{name}` / `log-stderr-{name}` | 프로세스 출력 스트리밍 |
 | `uptime-timer` | 1초 주기 업타임 레이블 갱신 |
-| `health-monitor` | 30초 주기 HTTP 헬스체크 |
+| `health-monitor` | intervalSeconds(기본 10초) 주기 HTTP 헬스체크 + 메모리 수집 |
 | `system-monitor` | CPU·메모리 수집 |
 
 ---
 
 ## 데이터 영속성
 
-모든 파일은 `~/llm-services/` 하위에 통일 관리된다 (`PlatformUtil.getAppHome()`).
+모든 파일은 `~/.llm-manager/` 하위에 통일 관리된다 (`PlatformUtil.getAppHome()`).
 
 | 파일 | 관리 클래스 | 내용 |
 |------|------------|------|
-| `~/llm-services/services.json` | `ServiceRegistry` | 사용자가 추가한 서비스 정의 목록 |
-| `~/llm-services/settings.json` | `AppSettingsRepository` | 앱 설정 (테마, API 서버 포트 등) |
-| `~/llm-services/projects.json` | `ProjectRegistry` | LLM 스킬 설치 프로젝트 목록 |
-| `~/llm-services/app.log` | Logback | 앱 구동 로그 (7일 롤링) |
+| `~/.llm-manager/services.json` | `ServiceRegistry` | 사용자가 추가한 서비스 정의 목록 |
+| `~/.llm-manager/settings.json` | `AppSettingsRepository` | 앱 설정 (테마, API 서버 포트, 헬스체크 주기 등) |
+| `~/.llm-manager/projects.json` | `ProjectRegistry` | LLM 스킬 설치 프로젝트 목록 |
+| `~/.llm-manager/app.log` | Logback | 앱 구동 로그 (7일 롤링) |
 
 ### 경로 변수 (`PlatformUtil.resolvePath`)
 
@@ -162,9 +214,36 @@ main.fxml (MainController)
 | 변수 | 치환값 |
 |------|--------|
 | `${user.home}` | 사용자 홈 디렉토리 |
-| `${llm.home}` | `~/llm-services` (앱 홈) |
+| `${llm.home}` | `~/.llm-manager` (앱 홈) |
 
 팝업 표시 전 `BuiltinServiceSetupController`가 `resolvePath()`를 호출해 절대 경로로 변환하며, `services.json`에는 치환된 절대 경로가 저장된다.
+
+---
+
+## 번들 MCP 서버
+
+`lib/` 디렉토리에 실행 가능한 MCP 서버 JAR이 포함된다.
+
+| 파일 | 설명 |
+|------|------|
+| `lib/sql-gen-mcp-1.0.0-SNAPSHOT.jar` | SQL 생성 MCP 서버 |
+| `lib/swagger-mcp-server.jar` | Swagger/OpenAPI MCP 서버 |
+
+---
+
+## LLM 스킬 리소스
+
+`src/main/resources/llm-skills/` 하위에 AI 도구별 스킬 파일이 포함된다.
+
+```
+llm-skills/
+  ├─ claude/commands/       ← Claude Code 슬래시 커맨드
+  ├─ copilot/               ← GitHub Copilot 스킬
+  ├─ cursor/rules/          ← Cursor 규칙
+  └─ gemini/                ← Gemini 스킬
+```
+
+`LlmSkillInstaller`가 선택한 AI 도구의 스킬 파일을 프로젝트 디렉토리에 설치한다.
 
 ---
 

@@ -4,6 +4,7 @@
  */
 package org.kyj.llmmanager.ui.controller;
 
+import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.*;
 import org.kyj.llmmanager.service.ServiceCustomizer;
 import org.kyj.llmmanager.service.ServicePackLoader;
@@ -62,6 +63,9 @@ public class AddServiceController {
     /** 사용자가 '추가' 버튼을 누르면 채워지는 최종 ServiceDefinition. 취소 시 null. */
     private ServiceDefinition result;
 
+    /** 템플릿 이름 → ServiceDefinition. lib/def/*.json에서 동적으로 로드. */
+    private final Map<String, ServiceDefinition> templateDefs = new LinkedHashMap<>();
+
     /** 현재 폼에 표시된 ArgSpec 목록 */
     private List<ArgSpec> currentArgSpecs = new ArrayList<>();
     /** argSpec.name → 활성화 체크박스 */
@@ -74,12 +78,19 @@ public class AddServiceController {
         runtimeCombo.getItems().addAll(RuntimeType.values());
         runtimeCombo.setValue(RuntimeType.PYTHON);
 
-        templateCombo.getItems().addAll(
-                "직접 입력",
-                "BGE-M3 Embedding Server",
-                "MCP Server (Node.js)",
-                "Python FastAPI Server"
-        );
+        templateCombo.getItems().add("직접 입력");
+
+        // lib/def/*.json 에서 builtin 서비스 정의를 동적으로 로드해 템플릿 목록에 추가
+        try {
+            AppContext.getInstance().getBuiltinServiceLoader().loadAll().forEach(def -> {
+                templateDefs.put(def.getName(), def);
+                templateCombo.getItems().add(def.getName());
+            });
+        } catch (Exception ignored) {}
+
+        // 고정 제공 제네릭 템플릿
+        templateCombo.getItems().addAll("MCP Server (Node.js)", "Python FastAPI Server");
+
         templateCombo.setValue("직접 입력");
         templateCombo.setOnAction(e -> applyTemplate(templateCombo.getValue()));
 
@@ -321,25 +332,23 @@ public class AddServiceController {
 
     /**
      * 선택한 템플릿에 맞게 폼 필드를 자동으로 채운다.
+     * lib/def 에서 로드된 builtin 템플릿은 populateForm()으로 처리하고,
+     * 제네릭 템플릿은 직접 필드를 세팅한다.
      *
      * @param template 선택한 템플릿 이름
      */
     private void applyTemplate(String template) {
-        if (template == null) return;
+        if (template == null || "직접 입력".equals(template)) return;
+
+        // lib/def 에서 로드된 builtin 정의가 있으면 폼에 채우고 종료
+        ServiceDefinition builtin = templateDefs.get(template);
+        if (builtin != null) {
+            populateForm(builtin);
+            return;
+        }
+
+        // 제네릭 템플릿 (파일 없이 하드코딩)
         switch (template) {
-            case "BGE-M3 Embedding Server" -> {
-                nameField.setText("BGE-M3 Embedding Server");
-                descriptionField.setText("BAAI/bge-m3 embedding model server (FastAPI)");
-                repoUrlField.setText("https://github.com/zaruous/bgem3-pyserver");
-                installDirField.setText(
-                        PlatformUtil.getDefaultInstallBase().resolve("bgem3-pyserver").toString());
-                runtimeCombo.setValue(RuntimeType.PYTHON);
-                startCommandArea.setText("python server.py");
-                installCommandsArea.setText(
-                        "pip install fastapi \"uvicorn[standard]\" FlagEmbedding torch pydantic numpy");
-                portField.setText("3000");
-                groovyScriptArea.clear();
-            }
             case "MCP Server (Node.js)" -> {
                 nameField.setText("MCP Server");
                 descriptionField.setText("Model Context Protocol server");
@@ -358,8 +367,7 @@ public class AddServiceController {
                 portField.clear();
                 groovyScriptArea.clear();
             }
-            default -> {
-            }
+            default -> { }
         }
     }
 

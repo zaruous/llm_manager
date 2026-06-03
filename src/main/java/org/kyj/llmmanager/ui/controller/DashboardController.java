@@ -10,8 +10,11 @@ import org.kyj.llmmanager.model.ServiceStatus;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Separator;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
@@ -101,6 +104,39 @@ public class DashboardController {
         descLabel.setWrapText(true);
         descLabel.setMaxWidth(180);
 
+        // ── 메모리 ProgressBar + 수치 레이블 ──
+        ProgressBar memBar = new ProgressBar(0);
+        memBar.setMaxWidth(Double.MAX_VALUE);
+        memBar.setPrefHeight(8);
+        memBar.setStyle("-fx-accent: #5588bb; -fx-background-radius: 4; -fx-border-radius: 4;");
+
+        Label memDetailLabel = new Label();
+        memDetailLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #8888bb;");
+
+        // ── Canvas 스파크라인 ──
+        Canvas sparkline = new Canvas(182, 48);
+
+        VBox memSection = new VBox(3, memBar, memDetailLabel, sparkline);
+        // 항상 공간 유지
+        resetMemSection(memBar, memDetailLabel, sparkline);
+
+        // 메모리 갱신 함수 — ProgressBar·레이블·스파크라인 일괄 갱신
+        Runnable updateMem = () -> {
+            long rss     = inst.getMemoryBytes();
+            long virtual = inst.getVirtualMemoryBytes();
+            if (rss > 0 && inst.getStatus() == ServiceStatus.RUNNING) {
+                memBar.setProgress(virtual > 0 ? (double) rss / virtual : 0);
+                memBar.setStyle("-fx-accent: #5588bb; -fx-background-radius: 4; -fx-border-radius: 4;");
+                memDetailLabel.setText(formatMemory(rss) + " / " + formatMemory(virtual));
+                memDetailLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #8888bb;");
+                drawSparkline(sparkline, inst.getMemoryHistory());
+            } else {
+                resetMemSection(memBar, memDetailLabel, sparkline);
+            }
+        };
+
+        inst.memoryBytesProperty().addListener((obs, o, n) -> updateMem.run());
+
         // ── 시작/중지 버튼 ──
         Button actionBtn = new Button(actionLabel(inst.getStatus()));
         actionBtn.setStyle(actionStyle(inst.getStatus()));
@@ -113,23 +149,113 @@ public class DashboardController {
             statusLabel.setText(newStatus.getLabel());
             actionBtn.setText(actionLabel(newStatus));
             actionBtn.setStyle(actionStyle(newStatus));
+            if (newStatus != ServiceStatus.RUNNING) {
+                inst.setMemoryBytes(0);
+                resetMemSection(memBar, memDetailLabel, sparkline);
+            }
             updateSummary(AppContext.getInstance().getProcessManager().getAllInstances());
         });
 
         // ── 카드 레이아웃 ──
-        VBox card = new VBox(8, nameRow, statusLabel, portLabel, descLabel,
+        VBox card = new VBox(8, nameRow, statusLabel, portLabel, memSection, descLabel,
                 new Separator(), actionBtn);
         card.setPadding(new Insets(14));
-        card.setPrefWidth(210);
-        card.setMaxWidth(210);
+        card.setPrefWidth(230);
+        card.setMaxWidth(230);
         card.setStyle(
                 "-fx-background-color: #1e1e2e;" +
                 "-fx-border-color: #2a2a3a;" +
                 "-fx-border-radius: 6;" +
-                "-fx-background-radius: 6;");
+                "-fx-background-radius: 6;" +
+                "-fx-cursor: hand;");
         VBox.setVgrow(descLabel, Priority.ALWAYS);
 
+        // 카드 클릭 시 메모리 상세 팝업
+        card.setOnMouseClicked(e -> showMemoryPopup(inst));
+
         return card;
+    }
+
+    /** 메모리 섹션을 미실행 플레이스홀더 상태로 초기화한다. */
+    private void resetMemSection(ProgressBar bar, Label lbl, Canvas canvas) {
+        bar.setProgress(0);
+        bar.setStyle("-fx-accent: #3a3a4a; -fx-background-radius: 4; -fx-border-radius: 4;");
+        lbl.setText("서비스 미실행");
+        lbl.setStyle("-fx-font-size: 10px; -fx-text-fill: #444455;");
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+        gc.setStroke(Color.web("#2a2a3a"));
+        gc.setLineWidth(1);
+        gc.setLineDashes(4);
+        gc.strokeLine(0, canvas.getHeight() / 2, canvas.getWidth(), canvas.getHeight() / 2);
+        gc.setLineDashes(0);
+    }
+
+    /**
+     * bytes를 사람이 읽기 쉬운 메모리 문자열로 변환한다.
+     *
+     * @param bytes 바이트 값
+     * @return "1.2 GB" 형식 문자열
+     */
+    private String formatMemory(long bytes) {
+        if (bytes <= 0) return "0 MB";
+        if (bytes >= 1024L * 1024 * 1024)
+            return String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024));
+        if (bytes >= 1024L * 1024)
+            return String.format("%.0f MB", bytes / (1024.0 * 1024));
+        return String.format("%.0f KB", bytes / 1024.0);
+    }
+
+    /**
+     * RSS 이력 데이터를 Canvas에 채워진 스파크라인으로 그린다.
+     * 데이터가 2개 미만이면 그리지 않는다.
+     *
+     * @param canvas  대상 Canvas
+     * @param history RSS 이력 (bytes)
+     */
+    private void drawSparkline(Canvas canvas, List<Long> history) {
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        double w = canvas.getWidth();
+        double h = canvas.getHeight();
+        gc.clearRect(0, 0, w, h);
+
+        if (history.size() < 2) return;
+
+        long max = history.stream().mapToLong(Long::longValue).max().orElse(1);
+        if (max == 0) return;
+
+        double xStep = w / (history.size() - 1);
+
+        // 채우기
+        gc.setFill(Color.web("#5588bb", 0.25));
+        gc.beginPath();
+        gc.moveTo(0, h);
+        for (int i = 0; i < history.size(); i++) {
+            double x = i * xStep;
+            double y = h - (h * 0.9 * history.get(i) / max);
+            gc.lineTo(x, y);
+        }
+        gc.lineTo(w, h);
+        gc.closePath();
+        gc.fill();
+
+        // 꺾은선
+        gc.setStroke(Color.web("#5588bb", 0.85));
+        gc.setLineWidth(1.5);
+        gc.beginPath();
+        for (int i = 0; i < history.size(); i++) {
+            double x = i * xStep;
+            double y = h - (h * 0.9 * history.get(i) / max);
+            if (i == 0) gc.moveTo(x, y); else gc.lineTo(x, y);
+        }
+        gc.stroke();
+
+        // 최신 값 점
+        int last = history.size() - 1;
+        double lx = last * xStep;
+        double ly = h - (h * 0.9 * history.get(last) / max);
+        gc.setFill(Color.web("#88bbee"));
+        gc.fillOval(lx - 3, ly - 3, 6, 6);
     }
 
     /** 상태에 따라 상태 점 색상을 설정한다. */
@@ -189,6 +315,74 @@ public class DashboardController {
         // 오류 없으면 오류 레이블 숨김
         errorLabel.setVisible(error > 0);
         errorLabel.setManaged(error > 0);
+    }
+
+    // =========================================================
+    // 메모리 상세 팝업
+    // =========================================================
+
+    /**
+     * 서비스의 메모리 이력을 확대된 그래프로 표시하는 팝업을 연다.
+     * 미실행 서비스는 팝업을 열지 않는다.
+     *
+     * @param inst 조회할 서비스 인스턴스
+     */
+    private void showMemoryPopup(ServiceInstance inst) {
+        if (inst.getStatus() != ServiceStatus.RUNNING) return;
+
+        javafx.stage.Stage popup = new javafx.stage.Stage();
+        popup.setTitle(inst.getDefinition().getName() + " — 메모리 모니터링");
+        popup.initModality(javafx.stage.Modality.NONE);
+
+        // 상단 수치 요약
+        long rss     = inst.getMemoryBytes();
+        long virtual = inst.getVirtualMemoryBytes();
+
+        Label titleLbl = new Label(inst.getDefinition().getName());
+        titleLbl.setStyle("-fx-font-size: 15px; -fx-font-weight: bold;");
+
+        Label rssLbl = new Label("RSS(물리): " + formatMemory(rss));
+        rssLbl.setStyle("-fx-font-size: 13px; -fx-text-fill: #88bbee;");
+
+        Label totalLbl = new Label("가상 할당량: " + formatMemory(virtual));
+        totalLbl.setStyle("-fx-font-size: 11px; -fx-text-fill: #888888;");
+
+        ProgressBar bar = new ProgressBar(virtual > 0 ? (double) rss / virtual : 0);
+        bar.setMaxWidth(Double.MAX_VALUE);
+        bar.setPrefHeight(12);
+        bar.setStyle("-fx-accent: #5588bb;");
+
+        Label pctLbl = new Label(virtual > 0
+                ? String.format("%.1f%% 상주 중", 100.0 * rss / virtual) : "");
+        pctLbl.setStyle("-fx-font-size: 11px; -fx-text-fill: #888888;");
+
+        // 확대 스파크라인 캔버스
+        Canvas bigChart = new Canvas(460, 160);
+        drawSparkline(bigChart, inst.getMemoryHistory());
+
+        Label hintLbl = new Label("최근 " + inst.getMemoryHistory().size() + "회 샘플 (10초 간격)");
+        hintLbl.setStyle("-fx-font-size: 10px; -fx-text-fill: #555566;");
+
+        VBox root = new VBox(10, titleLbl, rssLbl, totalLbl, bar, pctLbl,
+                new Separator(), bigChart, hintLbl);
+        root.setPadding(new Insets(20));
+        root.setStyle("-fx-background-color: #1e1e2e;");
+
+        // 팝업 열려 있는 동안 10초마다 갱신
+        inst.memoryBytesProperty().addListener((obs, o, n) -> {
+            if (!popup.isShowing()) return;
+            long r = n.longValue();
+            long v = inst.getVirtualMemoryBytes();
+            rssLbl.setText("RSS(물리): " + formatMemory(r));
+            totalLbl.setText("가상 할당량: " + formatMemory(v));
+            bar.setProgress(v > 0 ? (double) r / v : 0);
+            pctLbl.setText(v > 0 ? String.format("%.1f%% 상주 중", 100.0 * r / v) : "");
+            hintLbl.setText("최근 " + inst.getMemoryHistory().size() + "회 샘플 (10초 간격)");
+            drawSparkline(bigChart, inst.getMemoryHistory());
+        });
+
+        popup.setScene(new javafx.scene.Scene(root, 500, 380));
+        popup.show();
     }
 
     // =========================================================

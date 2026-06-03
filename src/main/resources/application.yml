@@ -44,3 +44,9 @@ runtime:
 # CLI: --install.base=D:\llm-services
 install:
   base: ""
+
+# 모니터링 설정
+monitor:
+  # 서비스 헬스체크 및 메모리 수집 주기 (초, 1~10)
+  # CLI: --monitor.health-check-interval=5
+  health-check-interval: 10

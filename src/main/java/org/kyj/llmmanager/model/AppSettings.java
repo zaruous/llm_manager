@@ -41,6 +41,9 @@ public class AppSettings {
     /** 내장 REST API 서버 포트 (기본값: 8185) */
     private int apiServerPort = 8185;
 
+    /** 헬스체크 및 메모리 수집 주기 (초, 1~10, 기본값: 10) */
+    private int healthCheckInterval = 10;
+
     public AppSettings() {
         // 플랫폼 기본값으로 초기화
         this.pythonCommand = PlatformUtil.getPythonCommand();
@@ -75,4 +78,16 @@ public class AppSettings {
 
     public int getApiServerPort() { return apiServerPort; }
     public void setApiServerPort(int apiServerPort) { this.apiServerPort = apiServerPort; }
+
+    /**
+     * 헬스체크 주기를 반환한다. 1~10 범위를 벗어나면 기본값 10으로 클램핑.
+     *
+     * @return 1~10 사이의 헬스체크 주기 (초)
+     */
+    public int getHealthCheckInterval() {
+        return Math.max(1, Math.min(10, healthCheckInterval));
+    }
+    public void setHealthCheckInterval(int healthCheckInterval) {
+        this.healthCheckInterval = healthCheckInterval;
+    }
 }

@@ -7,8 +7,14 @@ package org.kyj.llmmanager.model;
 import javafx.beans.property.*;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.beans.property.LongProperty;
+import javafx.beans.property.SimpleLongProperty;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
 
 /**
  * 런타임에 실행 중인 서비스 인스턴스.
@@ -35,6 +41,15 @@ public class ServiceInstance {
 
     /** 프로세스 시작 시각. 업타임 계산에 사용. */
     private Instant startTime;
+
+    /** 프로세스 RSS(Resident Set Size) 메모리 사용량 (bytes). 미실행 시 0. */
+    private final LongProperty memoryBytes = new SimpleLongProperty(0);
+
+    /** 프로세스 가상 메모리 총 할당량 (bytes). RSS의 분모로 사용. 미실행 시 0. */
+    private final LongProperty virtualMemoryBytes = new SimpleLongProperty(0);
+
+    /** 최근 20개 RSS 샘플. 스파크라인 그래프에 사용. JavaFX 스레드에서만 접근. */
+    private final Deque<Long> memoryHistory = new ArrayDeque<>();
 
     public ServiceInstance(ServiceDefinition definition) {
         this.definition = definition;
@@ -68,6 +83,28 @@ public class ServiceInstance {
 
     public Instant getStartTime() { return startTime; }
     public void setStartTime(Instant startTime) { this.startTime = startTime; }
+
+    public long getMemoryBytes() { return memoryBytes.get(); }
+
+    /**
+     * RSS 메모리를 갱신하고 스파크라인용 이력에 추가한다.
+     * 최대 20개 샘플만 유지한다.
+     *
+     * @param bytes 최신 RSS 바이트 값
+     */
+    public void setMemoryBytes(long bytes) {
+        memoryBytes.set(bytes);
+        if (memoryHistory.size() >= 20) memoryHistory.pollFirst();
+        memoryHistory.addLast(bytes);
+    }
+
+    public LongProperty memoryBytesProperty() { return memoryBytes; }
+
+    public long getVirtualMemoryBytes() { return virtualMemoryBytes.get(); }
+    public void setVirtualMemoryBytes(long bytes) { virtualMemoryBytes.set(bytes); }
+
+    /** 스파크라인용 RSS 이력 스냅샷을 반환한다. */
+    public List<Long> getMemoryHistory() { return new ArrayList<>(memoryHistory); }
 
     /**
      * 시작 시각 기준 경과 시간을 HH:mm:ss 형식으로 반환. 미시작이면 '-'.

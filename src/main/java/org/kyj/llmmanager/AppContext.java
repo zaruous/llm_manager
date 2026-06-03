@@ -61,7 +61,8 @@ public class AppContext {
         logService = new LogService();
         processManager = new ProcessManager(logService);
         installationService = new InstallationService();
-        healthMonitor = new HealthMonitor(processManager);
+        healthMonitor = new HealthMonitor(processManager,
+                appSettingsRepository.get().getHealthCheckInterval());
         healthMonitor.start();
 
         llmSkillInstaller = new LlmSkillInstaller();

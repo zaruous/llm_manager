@@ -115,6 +115,9 @@ public final class AppConfigLoader {
                 && !cfg.install.base.isBlank()) {
             s.setInstallBase(cfg.install.base);
         }
+        if (cfg.monitor != null && cfg.monitor.healthCheckInterval != null) {
+            s.setHealthCheckInterval(cfg.monitor.healthCheckInterval);
+        }
     }
 
     // =========================================================
@@ -136,7 +139,9 @@ public final class AppConfigLoader {
         getCli("runtime.node-home") .ifPresent(s::setNodeHome);
         getCli("runtime.java")      .ifPresent(s::setJavaCommand);
         getCli("runtime.java-home") .ifPresent(s::setJavaHome);
-        getCli("install.base")      .ifPresent(s::setInstallBase);
+        getCli("install.base")               .ifPresent(s::setInstallBase);
+        getCli("monitor.health-check-interval")
+                .ifPresent(v -> s.setHealthCheckInterval(parseInt(v, s.getHealthCheckInterval())));
     }
 
     private static Optional<String> getCli(String key) {
@@ -162,6 +167,7 @@ public final class AppConfigLoader {
         public ApiSection     api;
         public RuntimeSection runtime;
         public InstallSection install;
+        public MonitorSection monitor;
 
         @JsonIgnoreProperties(ignoreUnknown = true)
         static class ApiSection {
@@ -186,6 +192,11 @@ public final class AppConfigLoader {
         @JsonIgnoreProperties(ignoreUnknown = true)
         static class InstallSection {
             public String base;
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        static class MonitorSection {
+            @JsonProperty("health-check-interval") public Integer healthCheckInterval;
         }
     }
 }

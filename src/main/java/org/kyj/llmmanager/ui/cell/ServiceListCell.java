@@ -4,13 +4,13 @@
  */
 package org.kyj.llmmanager.ui.cell;
 
+import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.ServiceInstance;
 import org.kyj.llmmanager.model.ServiceStatus;
 import javafx.beans.value.ChangeListener;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
+import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -54,6 +54,31 @@ public class ServiceListCell extends ListCell<ServiceInstance> {
         container = new HBox(10, statusDot, textBox);
         container.setAlignment(Pos.CENTER_LEFT);
         container.setPadding(new Insets(8, 12, 8, 12));
+
+        // 우클릭 컨텍스트 메뉴 — 이름 변경
+        MenuItem renameItem = new MenuItem("이름 변경");
+        renameItem.setOnAction(e -> handleRename());
+        setContextMenu(new ContextMenu(renameItem));
+    }
+
+    /**
+     * TextInputDialog로 새 이름을 입력받아 서비스 정의와 저장소에 반영한다.
+     */
+    private void handleRename() {
+        ServiceInstance inst = getItem();
+        if (inst == null) return;
+
+        TextInputDialog dialog = new TextInputDialog(inst.getDefinition().getName());
+        dialog.setTitle("이름 변경");
+        dialog.setHeaderText(null);
+        dialog.setContentText("새 이름:");
+        dialog.showAndWait().ifPresent(newName -> {
+            if (newName.isBlank()) return;
+            inst.getDefinition().setName(newName.trim());
+            AppContext.getInstance().getServiceRegistry().update(inst.getDefinition());
+            // 셀 이름 레이블 즉시 갱신
+            nameLabel.setText(newName.trim());
+        });
     }
 
     /**
