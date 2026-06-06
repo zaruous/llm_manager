@@ -33,7 +33,7 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 │                        Model Layer                              │
 │  ServiceDefinition  ServiceInstance  ArgSpec                    │
 │  RuntimeType  ServiceStatus  AppSettings  SkillPack             │
-│  LlmTool  ProjectConfig  SkillFile                              │
+│  LlmTool  ProjectConfig  SkillFile  LoadFileEntry               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -51,9 +51,9 @@ main()
 LlmManagerApp.start()
   ├─ NordDark 테마 적용
   ├─ AppContext.init()
-  │     ├─ AppSettingsRepository.load()   ← settings.json
+  │     ├─ AppSettingsRepository.load()   ← ~/llm-services/settings.json
   │     ├─ AppConfigLoader.applyCli()     ← CLI 오버라이드 (최우선 순위)
-  │     ├─ ServiceRegistry.load()         ← services.json
+  │     ├─ ServiceRegistry.load()         ← ~/llm-services/services.json
   │     ├─ BuiltinServiceLoader 생성      ← lib/def/*.json (지연 로드)
   │     ├─ LogService / ProcessManager 생성
   │     ├─ PidFileManager 생성            ← PID 파일 기반 고아 프로세스 추적
@@ -87,7 +87,7 @@ LlmManagerApp.start()
 - `onStatusChange` 콜백 — 상태 변경 시 트레이 메뉴 갱신
 
 ### ServiceRegistry
-`~/.llm-manager/services.json` 영속 저장소.  
+`~/llm-services/services.json` 영속 저장소.
 `add()` / `remove()` / `update()` 호출 시마다 즉시 파일에 저장한다.
 
 ### HealthMonitor
@@ -118,6 +118,18 @@ Javalin 기반 내장 REST API 서버. 설정에서 활성화 시 기동.
 ### SystemMonitorService
 OSHI 라이브러리로 CPU 사용률·물리 메모리를 수집한다.  
 `MainController`의 2초 주기 `Timeline`이 수집값을 읽어 대시보드 게이지에 표시한다.
+
+### LlmSkillInstaller
+`src/main/resources/llm-skills/tools.json`에 정의된 AI 도구별 스킬 팩을 읽고 프로젝트 디렉토리에 파일을 설치한다.
+지원 도구는 Cursor IDE, Claude Code, Gemini CLI, GitHub Copilot이다. 템플릿 파일은 `{{projectName}}`, `{{language}}`, `{{author}}` 변수를 치환한 뒤 저장한다.
+
+### LlmSkillsLoadController
+외부 디렉토리를 재귀 스캔해 `.md`, `.mdc`, `.json`, `.yaml`, `.yml`, `.txt`, `.toml`, `.xml` 파일을 선택 목록으로 표시한다.
+선택 파일은 상대 경로를 유지해 대상 프로젝트 디렉토리로 복사하며, `.git`, `node_modules`, `target`, `build`, `.gradle`, `.idea`, `.llm-backup*` 경로는 제외한다.
+
+### LlmSkillLibraryRepository
+사용자가 로드한 스킬·룰 파일을 DB에 저장하기 위한 저장소 구현이다. SQLite, PostgreSQL, Oracle, MSSQL provider 분기를 포함하지만 2026-06-07 현재 `AppContext`나 UI에서 사용되지 않는다.
+또한 HikariCP 의존성, `AppSettings` 설정 필드, `SkillFile.libraryFileId` 모델 필드가 아직 연결되지 않아 이 클래스 때문에 `./gradlew build`가 실패한다.
 
 ### DevHotReloader
 `-Pdev` 플래그로 실행 시 활성화.  
@@ -156,7 +168,15 @@ dashboard.fxml (DashboardController)
   └─ 전체 시작 / 전체 중지 / 새로고침 버튼
 
 llm-skills.fxml (LlmSkillsController)
-  └─ LLM 스킬(claude/copilot/cursor/gemini) 설치·관리
+  ├─ 설치 탭 (LlmSkillsInstallController)
+  │     ├─ tools.json 기반 도구/팩 선택
+  │     ├─ 설치 대상 미리보기
+  │     ├─ 기존 파일 .llm-backup/<timestamp>/ 백업 후 설치
+  │     └─ projects.json 설치 히스토리 저장
+  └─ 로드 탭 (LlmSkillsLoadController)
+        ├─ 외부 디렉토리 스캔
+        ├─ 스킬·룰 파일 선택 및 내용 미리보기
+        └─ 선택 파일을 대상 프로젝트로 상대 경로 유지 복사
 ```
 
 ---
@@ -165,7 +185,7 @@ llm-skills.fxml (LlmSkillsController)
 
 ```
 CLI 인수 (--key=value)
-  └─▷ settings.json (GUI 저장, ~/.llm-manager/settings.json)
+  └─▷ settings.json (GUI 저장, ~/llm-services/settings.json)
         └─▷ application.yml (배포 기본값)
 ```
 
@@ -198,14 +218,14 @@ CLI 인수 (--key=value)
 
 ## 데이터 영속성
 
-모든 파일은 `~/.llm-manager/` 하위에 통일 관리된다 (`PlatformUtil.getAppHome()`).
+모든 런타임 설정 파일은 `~/llm-services/` 하위에 통일 관리된다 (`PlatformUtil.getAppHome()`).
 
 | 파일 | 관리 클래스 | 내용 |
 |------|------------|------|
-| `~/.llm-manager/services.json` | `ServiceRegistry` | 사용자가 추가한 서비스 정의 목록 |
-| `~/.llm-manager/settings.json` | `AppSettingsRepository` | 앱 설정 (테마, API 서버 포트, 헬스체크 주기 등) |
-| `~/.llm-manager/projects.json` | `ProjectRegistry` | LLM 스킬 설치 프로젝트 목록 |
-| `~/.llm-manager/app.log` | Logback | 앱 구동 로그 (7일 롤링) |
+| `~/llm-services/services.json` | `ServiceRegistry` | 사용자가 추가한 서비스 정의 목록 |
+| `~/llm-services/settings.json` | `AppSettingsRepository` | 앱 설정 (API 서버 포트, 런타임 명령어, 헬스체크 주기 등) |
+| `~/llm-services/projects.json` | `ProjectRegistry` | LLM 스킬 설치 프로젝트 목록 |
+| `~/llm-services/app.log` | Logback | 앱 구동 로그 (7일 롤링) |
 
 ### 경로 변수 (`PlatformUtil.resolvePath`)
 
@@ -214,7 +234,7 @@ CLI 인수 (--key=value)
 | 변수 | 치환값 |
 |------|--------|
 | `${user.home}` | 사용자 홈 디렉토리 |
-| `${llm.home}` | `~/.llm-manager` (앱 홈) |
+| `${llm.home}` | `~/llm-services` (앱 홈) |
 
 팝업 표시 전 `BuiltinServiceSetupController`가 `resolvePath()`를 호출해 절대 경로로 변환하며, `services.json`에는 치환된 절대 경로가 저장된다.
 
@@ -244,6 +264,21 @@ llm-skills/
 ```
 
 `LlmSkillInstaller`가 선택한 AI 도구의 스킬 파일을 프로젝트 디렉토리에 설치한다.
+로드 탭은 별도 내장 리소스가 아니라 사용자가 선택한 외부 디렉토리의 파일을 대상 프로젝트로 복사한다.
+
+---
+
+## 현재 빌드 이슈 (2026-06-07)
+
+`./gradlew build`는 `LlmSkillLibraryRepository`에서 컴파일 실패한다.
+
+| 누락 영역 | 증상 |
+|----------|------|
+| Gradle 의존성 | `com.zaxxer.hikari.HikariConfig`, `HikariDataSource` 패키지를 찾지 못함 |
+| `AppSettings` | `getSkillLibraryDbProvider()`, `getSkillLibraryDbUrl()` 등 DB 설정 getter가 없음 |
+| `SkillFile` | DB 로드 결과를 담는 `setLibraryFileId(long)` 메서드가 없음 |
+
+현재 실행 가능한 UI 흐름은 `LlmSkillsInstallController`의 내장 팩 설치와 `LlmSkillsLoadController`의 파일 복사 로드이다. DB 기반 스킬 라이브러리는 연결 작업이 남아 있다.
 
 ---
 

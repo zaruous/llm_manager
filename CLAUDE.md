@@ -5,17 +5,21 @@
 JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 - 서비스 등록·시작·중지·설치·로그 모니터링
 - 개발 모드 핫 리로드 (FXML/CSS/DEF 파일 감시)
-- 기본 제공 서비스 정의 (`lib/def/`)와 사용자 서비스 (`~/.llm-manager/services.json`) 분리
+- 기본 제공 서비스 정의 (`lib/def/`)와 사용자 서비스 (`~/llm-services/services.json`) 분리
+- LLM 스킬 팩 설치와 외부 디렉토리 스킬·룰 파일 로드
 
 ## 주요 경로
 
 | 경로 | 역할 |
 |------|------|
-| `src/main/java/com/miracom/llmmanage/` | 소스 루트 |
-| `src/main/resources/com/miracom/llmmanage/` | FXML / CSS |
+| `src/main/java/org/kyj/llmmanager/` | Java 소스 루트 |
+| `src/main/resources/org/kyj/llmmanager/` | FXML / CSS / 도움말 리소스 |
+| `src/main/resources/llm-skills/` | Claude/Copilot/Cursor/Gemini 스킬 팩 리소스 |
 | `lib/def/` | 기본 제공 서비스 JSON (배포 포함) |
 | `lib/hotswap/hotswap-agent.jar` | 개발용 HotswapAgent (gitignore) |
-| `~/.llm-manager/services.json` | 사용자 서비스 목록 (런타임) |
+| `~/llm-services/services.json` | 사용자 서비스 목록 (런타임) |
+| `~/llm-services/settings.json` | 앱 설정 |
+| `~/llm-services/projects.json` | LLM 스킬 설치 히스토리 |
 
 ## 실행
 
@@ -27,6 +31,16 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 ./gradlew downloadHotswapAgent   # 최초 1회
 ./gradlew runDev
 ```
+
+## 현재 빌드 이슈
+
+2026-06-07 기준 `./gradlew build`는 `LlmSkillLibraryRepository`에서 실패한다.
+
+- HikariCP 의존성이 `build.gradle`에 없음
+- `AppSettings`에 `getSkillLibraryDb*()` 설정 getter가 없음
+- `SkillFile`에 `setLibraryFileId(long)`가 없음
+
+현재 UI의 "로드" 탭은 DB 저장이 아니라 선택 파일을 대상 프로젝트에 복사한다.
 
 ---
 

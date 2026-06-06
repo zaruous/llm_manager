@@ -221,7 +221,7 @@ List<String> buildJpackageArgs(String type, Project proj) {
                 '--win-menu',
                 '--win-shortcut',
                 '--win-menu-group', 'LLM Manager',
-                '--vendor',         'Miracom Inc.',
+                '--vendor',         'KYJ',
                 '--description',    'LLM Service Manager',
             ]
         } else if (os.macOsX) {
@@ -230,7 +230,7 @@ List<String> buildJpackageArgs(String type, Project proj) {
             cmd += [
                 '--linux-shortcut',
                 '--linux-menu-group', 'LLM Manager',
-                '--vendor',           'Miracom Inc.',
+                '--vendor',           'KYJ',
             ]
         }
     }

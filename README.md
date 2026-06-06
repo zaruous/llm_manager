@@ -19,7 +19,7 @@
 - **메모리 모니터링** — OSHI 기반 RSS·가상 메모리 수집. 대시보드 스파크라인으로 시각화
 - **기본 제공 서비스** — `lib/def/*.json`에 정의된 서비스를 선택만 하면 바로 추가
 - **내장 REST API** — Javalin 기반 API 서버(선택 활성화). Claude Code 등 외부 도구에서 서비스 상태 조회 가능
-- **LLM 스킬 설치** — Claude/Copilot/Cursor/Gemini 스킬 파일을 프로젝트 디렉토리에 자동 배포
+- **LLM 스킬 & 룰 관리** — Claude/Copilot/Cursor/Gemini 스킬 팩 설치, 외부 디렉토리 스캔 후 선택 파일 로드
 - **시스템 트레이** — 최소화 시 트레이 상주, 우클릭 메뉴로 빠른 제어
 
 ---
@@ -135,7 +135,7 @@ llm_manager/
 
 ## 데이터 저장 위치
 
-모든 사용자 데이터는 `~/.llm-manager/`에 저장된다.
+모든 사용자 데이터는 `~/llm-services/`에 저장된다.
 
 | 파일 | 내용 |
 |------|------|
@@ -143,6 +143,8 @@ llm_manager/
 | `settings.json` | 앱 설정 (런타임 경로, API 포트 등) |
 | `projects.json` | LLM 스킬 설치 프로젝트 목록 |
 | `app.log` | 앱 구동 로그 (7일 롤링) |
+
+> 코드 기준 앱 홈은 `PlatformUtil.getAppHome()`이며 OS와 무관하게 `~/llm-services`를 사용한다.
 
 ---
 
@@ -163,4 +165,17 @@ FXML·CSS 변경 시 앱 재시작 없이 자동으로 화면이 갱신된다.
 ## 문서
 
 - [아키텍처](docs/llm-manager/architecture.md) — 레이어 구조·컴포넌트·스레딩 모델
+- [서비스 설정 흐름](docs/llm-manager/service-configuration-flow.md) — builtin JSON, YAML 서비스팩, 사용자 서비스 저장 흐름
 - [패키징 가이드](docs/패키징.md) — 실행파일·설치파일 빌드 방법
+
+---
+
+## 현재 빌드 상태
+
+2026-06-07 기준 `./gradlew build`는 `LlmSkillLibraryRepository` 관련 컴파일 오류가 있다.
+
+- `build.gradle`에 HikariCP/JDBC 드라이버 의존성이 없음
+- `AppSettings`에 `getSkillLibraryDb*()` 설정 접근자가 없음
+- `SkillFile`에 `setLibraryFileId(long)`가 없음
+
+현재 UI의 LLM 스킬 "로드" 탭은 DB 저장소가 아니라 선택 파일을 대상 프로젝트에 복사하는 방식으로 동작한다.

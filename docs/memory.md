@@ -192,3 +192,27 @@ llm_manager/
 - [ ] `buildExe.ps1` 재시도 로직: Windows Defender 간섭 시 최대 2회 재시도
 - [ ] 아이콘 파일 미설정 (`packaging/windows/LLMManager.ico` 추가 필요)
 - [ ] `dev.md`, `,gitignore` 루트 미정리 파일 존재
+
+---
+
+## 세션 2 (2026-06-07)
+
+### 코드 분석 및 문서 최신화
+
+| # | 작업 | 파일 | 상태 |
+|---|------|------|------|
+| 1 | 앱 홈 경로 문서 정정 (`~/.llm-manager` → `~/llm-services`) | `README.md`, `docs/llm-manager/architecture.md`, `CLAUDE.md` | ✅ |
+| 2 | LLM 스킬 설치/로드 탭 흐름 문서화 | `README.md`, `docs/llm-manager/architecture.md`, `docs/llm-manager/service-configuration-flow.md` | ✅ |
+| 3 | 현재 빌드 실패 원인 기록 | `README.md`, `docs/llm-manager/architecture.md`, `CLAUDE.md` | ✅ |
+
+### 확인된 빌드 실패
+
+`./gradlew build` 실행 결과 `LlmSkillLibraryRepository`에서 컴파일 실패.
+
+| 원인 | 세부 내용 |
+|------|----------|
+| 의존성 누락 | `com.zaxxer.hikari.HikariConfig`, `HikariDataSource` 패키지를 찾지 못함 |
+| 설정 모델 미연결 | `AppSettings`에 `getSkillLibraryDbProvider()`, `getSkillLibraryDbUrl()` 등 getter가 없음 |
+| 모델 필드 미연결 | `SkillFile`에 `setLibraryFileId(long)`가 없음 |
+
+`LlmSkillLibraryRepository`는 DB 기반 스킬 라이브러리 저장소로 보이지만 현재 `AppContext`나 UI 컨트롤러에서 사용되지 않는다. 현재 UI의 로드 탭은 선택 파일을 대상 프로젝트에 상대 경로 유지 복사한다.

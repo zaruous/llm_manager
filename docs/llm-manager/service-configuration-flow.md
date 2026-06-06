@@ -148,3 +148,51 @@ ProcessManager.getOrCreate()           ← 메모리 인스턴스 생성
 | `PlatformUtil` | `util/` | OS 감지, 앱 홈 경로, `resolvePath()` 경로 변수 치환 |
 | `AddServiceDialog` | `ui/dialog/` | 범용 서비스 추가 팝업 (builtin → `BuiltinServiceSetupDialog`로 라우팅) |
 | `BuiltinServiceSetupDialog` | `ui/dialog/` | builtin 서비스 전용 최적화 팝업 |
+
+---
+
+## LLM 스킬 & 룰 관리 흐름
+
+서비스 정의 흐름과 별도로, LLM 스킬 관리는 `llm-skills.fxml` 팝업에서 두 탭으로 제공된다.
+
+### 설치 탭
+
+```
+src/main/resources/llm-skills/tools.json
+        │
+        ▼
+LlmSkillInstaller.loadTools()
+        │
+        ▼
+LlmSkillsInstallController
+  ├─ 도구 선택: Cursor IDE / Claude Code / Gemini CLI / GitHub Copilot
+  ├─ 팩 선택: 도구별 packs 목록
+  ├─ 미리보기: 설치 대상 파일과 신규/덮어쓰기 상태 표시
+  ├─ 백업 설치: 기존 파일을 .llm-backup/<timestamp>/ 아래 복사
+  └─ 설치: 템플릿 변수 치환 후 targetPath로 파일 저장
+        │
+        ▼
+ProjectRegistry.save() → ~/llm-services/projects.json
+```
+
+템플릿 파일은 `{{projectName}}`, `{{language}}`, `{{author}}` 변수를 치환한다.
+
+### 로드 탭
+
+```
+[소스 디렉토리 선택]
+        │
+        ▼
+LlmSkillsLoadController.onScan()
+  ├─ 재귀 탐색
+  ├─ 제외: .git, node_modules, target, build, .gradle, .idea, .llm-backup*
+  └─ 포함: .md, .mdc, .json, .yaml, .yml, .txt, .toml, .xml
+        │
+        ▼
+파일 목록 체크박스 + 내용 미리보기
+        │
+        ▼
+[로드] → 대상 프로젝트에 상대 경로 유지 복사 (기존 파일 덮어쓰기)
+```
+
+`LlmSkillLibraryRepository`는 DB 기반 스킬 라이브러리 저장소 구현을 포함하지만 현재 UI 흐름에서는 사용되지 않는다. 2026-06-07 기준 이 클래스는 HikariCP 의존성, `AppSettings` DB 설정 필드, `SkillFile.libraryFileId` 연결이 없어 빌드 실패 원인이 된다.
