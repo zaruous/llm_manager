@@ -116,12 +116,6 @@ public class LlmSkillsInstallController implements Initializable {
         if (!tools.isEmpty()) showPacks(tools.get(0));
     }
 
-    public void reloadTools() {
-        AppContext.getInstance().getLlmSkillInstaller().refreshLibrary();
-        loadTools();
-        updatePreview();
-    }
-
     private void showPacks(LlmTool tool) {
         packsContainer.getChildren().clear();
 

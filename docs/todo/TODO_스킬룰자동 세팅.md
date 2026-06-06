@@ -1,7 +1,4 @@
-# TODO Index — LLM 스킬 & 룰 자동 세팅
-
-> 전역 인덱스: [TODO_INDEX.md](TODO_INDEX.md)  
-> 이 문서는 `LLM 스킬 & 룰 자동 세팅` 주제의 기능별 인덱스다.
+# TODO — LLM 스킬 & 룰 자동 세팅
 
 ## 배경 / 핵심 관점
 
@@ -90,54 +87,14 @@ lib/
 
 ---
 
-## 특정 디렉토리 import 기능 검토
+## 구현 태스크
 
-현재 `로드` 탭은 소스 디렉토리를 재귀 스캔한 뒤, 선택한 파일을 대상 프로젝트에
-상대 경로 그대로 복사한다. 기능 방향은 맞지만, 실제 import 기능으로 쓰기에는
-덮어쓰기, 경로 안전성, UI 응답성 보강이 필요하다.
-
-### 현재 동작
-
-- 소스 디렉토리 선택 후 `.md`, `.mdc`, `.json`, `.yaml`, `.yml`, `.txt`, `.toml`, `.xml` 파일만 탐색
-- `.git`, `node_modules`, `target`, `build`, `.gradle`, `.idea`, `.llm-backup*` 경로 제외
-- 스캔된 파일은 기본 선택 상태로 표시
-- 선택한 파일을 대상 프로젝트에 `sourceRoot` 기준 상대 경로 그대로 복사
-- 기존 대상 파일은 `REPLACE_EXISTING`으로 무조건 덮어씀
-
-### 보강 필요 사항
-
-- `Files.walk(sourceRoot)` 스트림을 닫지 않아 Windows에서 디렉토리 핸들이 남을 수 있음
-- 제외 경로 판단이 절대 경로 전체를 기준으로 동작해, 상위 경로명이 `build` 또는 `target`이면 정상 파일도 제외될 수 있음
-- import 실행 시 기존 파일을 무조건 덮어써 `CLAUDE.md`, `.cursor/rules/*.mdc`, `.github/copilot-instructions.md` 등이 손실될 수 있음
-- 스캔, 미리보기, 복사가 JavaFX UI 스레드에서 동기 실행되어 큰 디렉토리에서 화면이 멈출 수 있음
-- 미리보기가 파일 전체를 UTF-8로 읽어 큰 파일에서 메모리와 응답성 문제가 생길 수 있음
-- `references/`, `scripts/`, `assets/`처럼 스킬 본문을 보조하는 폴더가 있는데, 현재 확장자 중심 필터만으로는 일부 필요한 파일이 누락될 수 있음
-
-### import 분류 정책 초안
-
-확장자만으로 포함 여부를 판단하지 않고, 경로 의미를 함께 본다.
-
-| 분류 | 경로 예시 | 기본 정책 |
-|------|-----------|-----------|
-| 규칙/명령/에이전트 | `.cursor/rules/**`, `.cursor/commands/**`, `.cursor/agents/**`, `.claude/commands/**` | 기본 포함 |
-| 스킬 본문 | `**/SKILL.md` | 기본 포함 |
-| references | `**/references/**` | 문서/데이터 파일 기본 포함 |
-| scripts | `**/scripts/**`, 스킬 폴더 아래 `.py/.js/.ts/.ps1/.sh` | 포함 후보, 실행 코드 경고 표시 |
-| assets | `**/assets/**`, 스킬 폴더 아래 `.png/.jpg/.svg/.pdf/.docx/.xlsx/.pptx` | 포함 후보, 바이너리/크기 표시 |
-| 민감/캐시 | `.env`, `*.key`, `*.pem`, `*pat*.txt`, `*token*`, `__pycache__`, `*.pyc`, `.git`, `node_modules` | 기본 제외 |
-
----
-
-## 세부 TODO 파일
-
-상세 구현 계획은 단계별 파일로 분리한다. 이 문서는 전체 방향과 링크만 유지한다.
-
-| 단계 | 문서 | 목적 |
-|------|------|------|
-| 1단계 | [TODO_스킬룰자동_1단계_import_안전성.md](TODO_스킬룰자동_1단계_import_안전성.md) | 현재 import 동작을 유지하면서 파일 핸들, 경로, 덮어쓰기 위험을 먼저 줄인다 |
-| 2단계 | [TODO_스킬룰자동_2단계_import_UX.md](TODO_스킬룰자동_2단계_import_UX.md) | 신규/충돌/덮어쓰기 상태를 import 전에 판단할 수 있게 UI를 정리한다 |
-| 3단계 | [TODO_스킬룰자동_3단계_백그라운드.md](TODO_스킬룰자동_3단계_백그라운드.md) | 스캔/복사를 백그라운드 작업으로 옮겨 JavaFX 화면 멈춤을 제거한다 |
-| 4단계 | [TODO_스킬룰자동_4단계_lib-skills.md](TODO_스킬룰자동_4단계_lib-skills.md) | classpath 내장 스킬을 파일시스템 기반 `lib/skills/` 저장소로 전환한다 |
+- [ ] `lib/skills/` 디렉토리 구조 생성 및 기존 classpath 스킬 파일 이전
+- [ ] `tools.json` 파일시스템 기반으로 재작성 (`sourcePath` 방식)
+- [ ] `LlmSkillInstaller` — classpath 로딩 제거, 파일시스템 로딩으로 전환  
+  (`BuiltinServiceLoader.resolveDefDir()` 패턴 적용)
+- [ ] `build.gradle` — `lib/skills/` 를 배포 패키지에 포함 (`lib/def` 방식 동일)
+- [ ] 교육자료(MESPlus) 스킬 파일 `lib/skills/` 하위에 추가
 
 ---
 

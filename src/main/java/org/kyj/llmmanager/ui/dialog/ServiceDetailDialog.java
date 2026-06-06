@@ -208,9 +208,7 @@ public class ServiceDetailDialog {
 
         // ── Stage 설정 ───────────────────────────────────────────────
         stage.setTitle("서비스 상세 — " + def.getName());
-        stage.setScene(SceneFactory.create(root, 720));
-        stage.setMinWidth(640);
-        stage.setMinHeight(480);
+        stage.setScene(SceneFactory.create(root, 600));
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
         SceneFactory.autoHeight(stage);

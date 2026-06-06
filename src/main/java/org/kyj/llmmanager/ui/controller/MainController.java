@@ -717,11 +717,11 @@ public class MainController implements Initializable {
     }
 
     /**
-     * 서비스의 startCommand에서 JAR 파일명을 추출해 번들 파일 위치를 탐색한다.
-     * 기준은 lib/def/*.json이 있는 디렉토리이며, 해당 정의 옆에 배포된 JAR를 설치용 원본으로 사용한다.
+     * 서비스의 startCommand에서 JAR 파일명을 추출해 lib/ 폴더에서 파일을 탐색한다.
+     * 개발 환경({@code ./gradlew run})과 배포 환경 모두 CWD 기준 lib/ 폴더를 확인한다.
      *
      * @param def 서비스 정의
-     * @return 번들에 존재하는 JAR File, 없으면 null
+     * @return lib/ 에 존재하는 JAR File, 없으면 null
      */
     private File findBundledJar(ServiceDefinition def) {
         String cmd = def.getStartCommand();
@@ -731,36 +731,12 @@ public class MainController implements Initializable {
         for (int i = 0; i < tokens.length - 1; i++) {
             if ("-jar".equalsIgnoreCase(tokens[i])) {
                 String jarName = tokens[i + 1];
-                for (Path candidate : bundledJarCandidates(jarName)) {
-                    if (Files.exists(candidate) && Files.isRegularFile(candidate)) {
-                        return candidate.toFile();
-                    }
-                }
+                File bundled = Path.of("lib", jarName).toFile();
+                if (bundled.exists()) return bundled;
                 break;
             }
         }
         return null;
-    }
-
-    private List<Path> bundledJarCandidates(String jarName) {
-        List<Path> candidates = new ArrayList<>();
-
-        if (ctx != null && ctx.getBuiltinServiceLoader() != null) {
-            Path defDir = ctx.getBuiltinServiceLoader().getDefDir();
-            Path bundleRoot = defDir.getParent();
-            if (bundleRoot != null) {
-                // installDist: <app>/lib/def + <app>/lib/<jar>
-                // jpackage:   <app>/app/def + <app>/app/<jar>
-                candidates.add(bundleRoot.resolve(jarName));
-                candidates.add(bundleRoot.resolve("lib").resolve(jarName));
-            }
-        }
-
-        // 개발 실행 fallback: 프로젝트 루트 기준 lib/<jar>
-        candidates.add(Path.of("lib", jarName));
-        candidates.add(Path.of(jarName));
-
-        return candidates;
     }
 
     @FXML
@@ -942,27 +918,13 @@ public class MainController implements Initializable {
     }
 
     @FXML
-    private void onLlmSkillsInstall() {
-        openLlmSkills(false);
-    }
-
-    @FXML
-    private void onLlmSkillsLoad() {
-        openLlmSkills(true);
-    }
-
-    private void openLlmSkills(boolean loadTab) {
+    private void onLlmSkills() {
         try {
             FXMLLoader loader = new FXMLLoader(
                 getClass().getResource("/org/kyj/llmmanager/llm-skills.fxml"));
             Stage stage = new Stage();
             stage.setTitle("LLM 스킬 & 룰 설치");
-            stage.setScene(SceneFactory.create(loader.load(), 1240, 760));
-            LlmSkillsController controller = loader.getController();
-            if (loadTab) controller.selectLoadTab();
-            else controller.selectInstallTab();
-            stage.setMinWidth(1120);
-            stage.setMinHeight(680);
+            stage.setScene(SceneFactory.create(loader.load()));  // FXML prefWidth/prefHeight 그대로 사용
             stage.initOwner(menuBar.getScene().getWindow());
             stage.initModality(Modality.NONE);
             stage.show();

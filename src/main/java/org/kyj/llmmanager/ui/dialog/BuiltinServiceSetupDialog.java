@@ -51,9 +51,7 @@ public class BuiltinServiceSetupDialog {
             stage.initOwner(owner);
             stage.initModality(Modality.WINDOW_MODAL);
             stage.setTitle(def.getName() + " — 서비스 설정");
-            stage.setScene(SceneFactory.create(root, 860, 640));
-            stage.setMinWidth(760);
-            stage.setMinHeight(560);
+            stage.setScene(SceneFactory.create(root, 800, 600));
             stage.setResizable(true);
             SceneFactory.autoHeight(stage);
             stage.showAndWait();

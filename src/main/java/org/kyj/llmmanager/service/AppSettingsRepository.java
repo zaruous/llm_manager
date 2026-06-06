@@ -50,7 +50,7 @@ public class AppSettingsRepository {
         // 2. settings.json 사용자 설정 (존재하면 YAML 기본값보다 우선)
         if (Files.exists(configFile)) {
             try {
-                mapper.readerForUpdating(current).readValue(configFile.toFile());
+                current = mapper.readValue(configFile.toFile(), AppSettings.class);
                 log.info("settings.json 로드: {}", configFile);
             } catch (IOException e) {
                 log.error("settings.json 로드 실패 — application.yml 기본값 사용", e);
