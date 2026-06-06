@@ -213,7 +213,9 @@ public class SettingsDialog {
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
         stage.setTitle("환경 설정");
-        stage.setScene(SceneFactory.create(root, 560));
+        stage.setScene(SceneFactory.create(root, 680));
+        stage.setMinWidth(620);
+        stage.setMinHeight(420);
         stage.setResizable(true);
         SceneFactory.autoHeight(stage);
         stage.showAndWait();

@@ -22,22 +22,42 @@ public class LlmSkillInstaller {
     private static final String TOOLS_JSON = "/llm-skills/tools.json";
 
     private final ObjectMapper mapper = new ObjectMapper();
+    private final LlmSkillLibraryRepository libraryRepository;
     private List<LlmTool> tools;
+
+    public LlmSkillInstaller(LlmSkillLibraryRepository libraryRepository) {
+        this.libraryRepository = libraryRepository;
+    }
 
     public List<LlmTool> loadTools() {
         if (tools != null) return tools;
+        List<LlmTool> loaded = new ArrayList<>();
         try (InputStream is = getClass().getResourceAsStream(TOOLS_JSON)) {
             if (is == null) {
                 log.warn("tools.json not found");
-                return Collections.emptyList();
+            } else {
+                loaded.addAll(mapper.readValue(is, new TypeReference<List<LlmTool>>() {}));
             }
-            tools = mapper.readValue(is, new TypeReference<>() {});
-            log.info("Loaded {} tools", tools.size());
         } catch (IOException e) {
             log.error("Failed to load tools.json", e);
-            tools = Collections.emptyList();
         }
+        loaded.addAll(libraryRepository.loadTools());
+        tools = loaded;
+        log.info("Loaded {} tools", tools.size());
         return tools;
+    }
+
+    public void refreshLibrary() {
+        libraryRepository.refresh();
+        tools = null;
+    }
+
+    public LlmSkillLibraryRepository getLibraryRepository() {
+        return libraryRepository;
+    }
+
+    public void shutdown() {
+        libraryRepository.close();
     }
 
     public record InstallResult(List<String> installed, List<String> skipped, List<String> errors) {}
@@ -63,10 +83,7 @@ public class LlmSkillInstaller {
                             continue;
                         }
 
-                        String content = readResource(sf.getResourcePath());
-                        if (sf.isTemplate()) {
-                            content = applyVariables(content, project.getVariables());
-                        }
+                        String content = readSkillContent(sf, project.getVariables());
 
                         Files.createDirectories(target.getParent());
                         Files.writeString(target, content, StandardCharsets.UTF_8);
@@ -132,7 +149,9 @@ public class LlmSkillInstaller {
     /** 스킬 파일의 내용을 읽어 반환 */
     public String readSkillContent(SkillFile sf, Map<String, String> variables) {
         try {
-            String content = readResource(sf.getResourcePath());
+            String content = sf.getLibraryFileId() != null
+                    ? libraryRepository.readContent(sf.getLibraryFileId())
+                    : readResource(sf.getResourcePath());
             return sf.isTemplate() ? applyVariables(content, variables) : content;
         } catch (IOException e) {
             return "파일을 읽을 수 없습니다: " + e.getMessage();

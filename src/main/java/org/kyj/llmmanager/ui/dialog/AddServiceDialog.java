@@ -48,7 +48,9 @@ public class AddServiceDialog {
             stage.initOwner(owner);
             stage.initModality(Modality.WINDOW_MODAL);
             stage.setTitle("서비스 추가");
-            stage.setScene(SceneFactory.create(root, 640));  // 너비 고정, 높이 자동
+            stage.setScene(SceneFactory.create(root, 760));  // 너비 고정, 높이 자동
+            stage.setMinWidth(680);
+            stage.setMinHeight(520);
             stage.setResizable(true);
             SceneFactory.autoHeight(stage);
             stage.showAndWait();

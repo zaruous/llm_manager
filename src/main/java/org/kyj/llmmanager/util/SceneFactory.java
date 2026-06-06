@@ -7,6 +7,7 @@ package org.kyj.llmmanager.util;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.layout.Region;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 /**
@@ -95,7 +96,28 @@ public final class SceneFactory {
      */
     public static void autoHeight(Stage stage) {
         // onShown: 윈도우가 실제로 렌더링된 뒤 레이아웃이 완성되므로 이 시점에 sizeToScene() 호출
-        stage.setOnShown(e -> stage.sizeToScene());
+        stage.setOnShown(e -> {
+            stage.sizeToScene();
+            clampToVisualBounds(stage);
+        });
+    }
+
+    /**
+     * 자동 높이 계산 후 화면보다 커진 팝업을 현재 주 모니터 안으로 제한한다.
+     * 긴 폼이나 많은 실행 인수를 가진 builtin 서비스 설정창이 화면 밖으로 벗어나는 것을 막는다.
+     */
+    private static void clampToVisualBounds(Stage stage) {
+        var bounds = Screen.getPrimary().getVisualBounds();
+        double maxWidth = bounds.getWidth() * 0.92;
+        double maxHeight = bounds.getHeight() * 0.90;
+
+        if (stage.getWidth() > maxWidth) {
+            stage.setWidth(maxWidth);
+        }
+        if (stage.getHeight() > maxHeight) {
+            stage.setHeight(maxHeight);
+        }
+        stage.centerOnScreen();
     }
 
     /**

@@ -23,7 +23,8 @@
                 <MenuItem text="API 서비스"   onAction="#onOpenApiServer" accelerator="Ctrl+Shift+A"/>
             </Menu>
             <Menu text="도구">
-                <MenuItem text="LLM 스킬"    onAction="#onLlmSkills"/>
+                <MenuItem text="LLM 스킬 설치" onAction="#onLlmSkillsInstall"/>
+                <MenuItem text="LLM 스킬 로드" onAction="#onLlmSkillsLoad"/>
             </Menu>
             <Menu text="설정">
                 <MenuItem text="환경설정"     onAction="#onSettings"      accelerator="Ctrl+Comma"/>

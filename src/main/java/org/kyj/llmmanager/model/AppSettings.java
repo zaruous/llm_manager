@@ -44,6 +44,39 @@ public class AppSettings {
     /** 헬스체크 및 메모리 수집 주기 (초, 1~10, 기본값: 10) */
     private int healthCheckInterval = 10;
 
+    /** LLM 스킬 라이브러리 DB provider (sqlite, postgresql, oracle, mssql) */
+    private String skillLibraryDbProvider = "sqlite";
+
+    /** LLM 스킬 라이브러리 JDBC URL. SQLite는 비어 있으면 앱 프로젝트 lib/cursor를 사용. */
+    private String skillLibraryDbUrl = "";
+
+    /** LLM 스킬 라이브러리 DB schema. SQLite는 사용하지 않음. */
+    private String skillLibraryDbSchema = "";
+
+    /** LLM 스킬 라이브러리 DB 사용자명 */
+    private String skillLibraryDbUsername = "";
+
+    /** LLM 스킬 라이브러리 DB 비밀번호 */
+    private String skillLibraryDbPassword = "";
+
+    /** LLM 스킬 라이브러리 JDBC driver class. 비어 있으면 provider 기본값 사용. */
+    private String skillLibraryDbDriverClass = "";
+
+    /** LLM 스킬 라이브러리 DB 커넥션 풀 최대 크기 */
+    private int skillLibraryDbMaximumPoolSize = 5;
+
+    /** LLM 스킬 라이브러리 DB 커넥션 풀 최소 idle 수 */
+    private int skillLibraryDbMinimumIdle = 1;
+
+    /** LLM 스킬 라이브러리 DB 커넥션 획득 timeout(ms) */
+    private long skillLibraryDbConnectionTimeoutMs = 30000;
+
+    /** LLM 스킬 라이브러리 DB idle timeout(ms) */
+    private long skillLibraryDbIdleTimeoutMs = 600000;
+
+    /** LLM 스킬 라이브러리 DB max lifetime(ms) */
+    private long skillLibraryDbMaxLifetimeMs = 1800000;
+
     public AppSettings() {
         // 플랫폼 기본값으로 초기화
         this.pythonCommand = PlatformUtil.getPythonCommand();
@@ -89,5 +122,60 @@ public class AppSettings {
     }
     public void setHealthCheckInterval(int healthCheckInterval) {
         this.healthCheckInterval = healthCheckInterval;
+    }
+
+    public String getSkillLibraryDbProvider() { return skillLibraryDbProvider; }
+    public void setSkillLibraryDbProvider(String skillLibraryDbProvider) {
+        this.skillLibraryDbProvider = skillLibraryDbProvider;
+    }
+
+    public String getSkillLibraryDbUrl() { return skillLibraryDbUrl; }
+    public void setSkillLibraryDbUrl(String skillLibraryDbUrl) {
+        this.skillLibraryDbUrl = skillLibraryDbUrl;
+    }
+
+    public String getSkillLibraryDbSchema() { return skillLibraryDbSchema; }
+    public void setSkillLibraryDbSchema(String skillLibraryDbSchema) {
+        this.skillLibraryDbSchema = skillLibraryDbSchema;
+    }
+
+    public String getSkillLibraryDbUsername() { return skillLibraryDbUsername; }
+    public void setSkillLibraryDbUsername(String skillLibraryDbUsername) {
+        this.skillLibraryDbUsername = skillLibraryDbUsername;
+    }
+
+    public String getSkillLibraryDbPassword() { return skillLibraryDbPassword; }
+    public void setSkillLibraryDbPassword(String skillLibraryDbPassword) {
+        this.skillLibraryDbPassword = skillLibraryDbPassword;
+    }
+
+    public String getSkillLibraryDbDriverClass() { return skillLibraryDbDriverClass; }
+    public void setSkillLibraryDbDriverClass(String skillLibraryDbDriverClass) {
+        this.skillLibraryDbDriverClass = skillLibraryDbDriverClass;
+    }
+
+    public int getSkillLibraryDbMaximumPoolSize() { return skillLibraryDbMaximumPoolSize; }
+    public void setSkillLibraryDbMaximumPoolSize(int skillLibraryDbMaximumPoolSize) {
+        this.skillLibraryDbMaximumPoolSize = skillLibraryDbMaximumPoolSize;
+    }
+
+    public int getSkillLibraryDbMinimumIdle() { return skillLibraryDbMinimumIdle; }
+    public void setSkillLibraryDbMinimumIdle(int skillLibraryDbMinimumIdle) {
+        this.skillLibraryDbMinimumIdle = skillLibraryDbMinimumIdle;
+    }
+
+    public long getSkillLibraryDbConnectionTimeoutMs() { return skillLibraryDbConnectionTimeoutMs; }
+    public void setSkillLibraryDbConnectionTimeoutMs(long skillLibraryDbConnectionTimeoutMs) {
+        this.skillLibraryDbConnectionTimeoutMs = skillLibraryDbConnectionTimeoutMs;
+    }
+
+    public long getSkillLibraryDbIdleTimeoutMs() { return skillLibraryDbIdleTimeoutMs; }
+    public void setSkillLibraryDbIdleTimeoutMs(long skillLibraryDbIdleTimeoutMs) {
+        this.skillLibraryDbIdleTimeoutMs = skillLibraryDbIdleTimeoutMs;
+    }
+
+    public long getSkillLibraryDbMaxLifetimeMs() { return skillLibraryDbMaxLifetimeMs; }
+    public void setSkillLibraryDbMaxLifetimeMs(long skillLibraryDbMaxLifetimeMs) {
+        this.skillLibraryDbMaxLifetimeMs = skillLibraryDbMaxLifetimeMs;
     }
 }

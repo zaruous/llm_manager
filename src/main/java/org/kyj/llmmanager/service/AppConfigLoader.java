@@ -115,6 +115,43 @@ public final class AppConfigLoader {
                 && !cfg.install.base.isBlank()) {
             s.setInstallBase(cfg.install.base);
         }
+        if (cfg.skillLibrary != null && cfg.skillLibrary.db != null) {
+            if (cfg.skillLibrary.db.provider != null) {
+                s.setSkillLibraryDbProvider(cfg.skillLibrary.db.provider);
+            }
+            if (cfg.skillLibrary.db.url != null) {
+                s.setSkillLibraryDbUrl(cfg.skillLibrary.db.url);
+            }
+            if (cfg.skillLibrary.db.schema != null) {
+                s.setSkillLibraryDbSchema(cfg.skillLibrary.db.schema);
+            }
+            if (cfg.skillLibrary.db.username != null) {
+                s.setSkillLibraryDbUsername(cfg.skillLibrary.db.username);
+            }
+            if (cfg.skillLibrary.db.password != null) {
+                s.setSkillLibraryDbPassword(cfg.skillLibrary.db.password);
+            }
+            if (cfg.skillLibrary.db.driverClass != null) {
+                s.setSkillLibraryDbDriverClass(cfg.skillLibrary.db.driverClass);
+            }
+            if (cfg.skillLibrary.db.pool != null) {
+                if (cfg.skillLibrary.db.pool.maximumPoolSize != null) {
+                    s.setSkillLibraryDbMaximumPoolSize(cfg.skillLibrary.db.pool.maximumPoolSize);
+                }
+                if (cfg.skillLibrary.db.pool.minimumIdle != null) {
+                    s.setSkillLibraryDbMinimumIdle(cfg.skillLibrary.db.pool.minimumIdle);
+                }
+                if (cfg.skillLibrary.db.pool.connectionTimeoutMs != null) {
+                    s.setSkillLibraryDbConnectionTimeoutMs(cfg.skillLibrary.db.pool.connectionTimeoutMs);
+                }
+                if (cfg.skillLibrary.db.pool.idleTimeoutMs != null) {
+                    s.setSkillLibraryDbIdleTimeoutMs(cfg.skillLibrary.db.pool.idleTimeoutMs);
+                }
+                if (cfg.skillLibrary.db.pool.maxLifetimeMs != null) {
+                    s.setSkillLibraryDbMaxLifetimeMs(cfg.skillLibrary.db.pool.maxLifetimeMs);
+                }
+            }
+        }
         if (cfg.monitor != null && cfg.monitor.healthCheckInterval != null) {
             s.setHealthCheckInterval(cfg.monitor.healthCheckInterval);
         }
@@ -140,6 +177,22 @@ public final class AppConfigLoader {
         getCli("runtime.java")      .ifPresent(s::setJavaCommand);
         getCli("runtime.java-home") .ifPresent(s::setJavaHome);
         getCli("install.base")               .ifPresent(s::setInstallBase);
+        getCli("skill-library.db.provider")  .ifPresent(s::setSkillLibraryDbProvider);
+        getCli("skill-library.db.url")       .ifPresent(s::setSkillLibraryDbUrl);
+        getCli("skill-library.db.schema")    .ifPresent(s::setSkillLibraryDbSchema);
+        getCli("skill-library.db.username")  .ifPresent(s::setSkillLibraryDbUsername);
+        getCli("skill-library.db.password")  .ifPresent(s::setSkillLibraryDbPassword);
+        getCli("skill-library.db.driver-class").ifPresent(s::setSkillLibraryDbDriverClass);
+        getCli("skill-library.db.pool.maximum-pool-size")
+                .ifPresent(v -> s.setSkillLibraryDbMaximumPoolSize(parseInt(v, s.getSkillLibraryDbMaximumPoolSize())));
+        getCli("skill-library.db.pool.minimum-idle")
+                .ifPresent(v -> s.setSkillLibraryDbMinimumIdle(parseInt(v, s.getSkillLibraryDbMinimumIdle())));
+        getCli("skill-library.db.pool.connection-timeout-ms")
+                .ifPresent(v -> s.setSkillLibraryDbConnectionTimeoutMs(parseLong(v, s.getSkillLibraryDbConnectionTimeoutMs())));
+        getCli("skill-library.db.pool.idle-timeout-ms")
+                .ifPresent(v -> s.setSkillLibraryDbIdleTimeoutMs(parseLong(v, s.getSkillLibraryDbIdleTimeoutMs())));
+        getCli("skill-library.db.pool.max-lifetime-ms")
+                .ifPresent(v -> s.setSkillLibraryDbMaxLifetimeMs(parseLong(v, s.getSkillLibraryDbMaxLifetimeMs())));
         getCli("monitor.health-check-interval")
                 .ifPresent(v -> s.setHealthCheckInterval(parseInt(v, s.getHealthCheckInterval())));
     }
@@ -150,6 +203,11 @@ public final class AppConfigLoader {
 
     private static int parseInt(String s, int defaultVal) {
         try { return Integer.parseInt(s.trim()); }
+        catch (NumberFormatException e) { return defaultVal; }
+    }
+
+    private static long parseLong(String s, long defaultVal) {
+        try { return Long.parseLong(s.trim()); }
         catch (NumberFormatException e) { return defaultVal; }
     }
 
@@ -167,6 +225,7 @@ public final class AppConfigLoader {
         public ApiSection     api;
         public RuntimeSection runtime;
         public InstallSection install;
+        @JsonProperty("skill-library") public SkillLibrarySection skillLibrary;
         public MonitorSection monitor;
 
         @JsonIgnoreProperties(ignoreUnknown = true)
@@ -192,6 +251,29 @@ public final class AppConfigLoader {
         @JsonIgnoreProperties(ignoreUnknown = true)
         static class InstallSection {
             public String base;
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        static class SkillLibrarySection {
+            public DbSection db;
+            @JsonIgnoreProperties(ignoreUnknown = true)
+            static class DbSection {
+                public String provider;
+                public String url;
+                public String schema;
+                public String username;
+                public String password;
+                @JsonProperty("driver-class") public String driverClass;
+                public PoolSection pool;
+                @JsonIgnoreProperties(ignoreUnknown = true)
+                static class PoolSection {
+                    @JsonProperty("maximum-pool-size") public Integer maximumPoolSize;
+                    @JsonProperty("minimum-idle") public Integer minimumIdle;
+                    @JsonProperty("connection-timeout-ms") public Long connectionTimeoutMs;
+                    @JsonProperty("idle-timeout-ms") public Long idleTimeoutMs;
+                    @JsonProperty("max-lifetime-ms") public Long maxLifetimeMs;
+                }
+            }
         }
 
         @JsonIgnoreProperties(ignoreUnknown = true)

@@ -45,6 +45,32 @@ runtime:
 install:
   base: ""
 
+# LLM 스킬 라이브러리 DB
+# provider: sqlite | postgresql | oracle | mssql
+# SQLite는 url을 비워 두면 프로젝트 루트의 lib/cursor/skill-library.sqlite를 사용합니다.
+# CLI:
+#   --skill-library.db.provider=postgresql
+#   --skill-library.db.url=jdbc:postgresql://localhost:5432/llm_manager
+#   --skill-library.db.schema=llm_manager
+#   --skill-library.db.username=llm
+#   --skill-library.db.password=secret
+skill-library:
+  db:
+    provider: sqlite
+    url: ""
+    # PostgreSQL/Oracle/MSSQL에서 사용할 schema.
+    # SQLite는 비워 둡니다.
+    schema: ""
+    username: ""
+    password: ""
+    driver-class: ""
+    pool:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout-ms: 30000
+      idle-timeout-ms: 600000
+      max-lifetime-ms: 1800000
+
 # 모니터링 설정
 monitor:
   # 서비스 헬스체크 및 메모리 수집 주기 (초, 1~10)

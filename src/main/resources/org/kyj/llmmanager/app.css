@@ -121,9 +121,75 @@
 
 /* ── Button ────────────────────────────────────────────────────────── */
 .button {
+    -fx-background-color: #313244;
+    -fx-border-color: #45475a;
+    -fx-border-radius: 4;
     -fx-background-radius: 4;
     -fx-cursor: hand;
     -fx-text-fill: #cdd6f4;
+    -fx-font-size: 12px;
+    -fx-padding: 6 12;
+    -fx-min-height: 30;
+}
+
+.button:hover {
+    -fx-background-color: #45475a;
+    -fx-border-color: #585b70;
+}
+
+.button:pressed {
+    -fx-background-color: #252535;
+}
+
+.button:disabled {
+    -fx-opacity: 0.55;
+    -fx-cursor: default;
+}
+
+.button:default {
+    -fx-background-color: #365f8f;
+    -fx-border-color: #4f7fb7;
+    -fx-text-fill: #ffffff;
+}
+
+.button-primary {
+    -fx-background-color: #365f8f;
+    -fx-border-color: #4f7fb7;
+    -fx-text-fill: #ffffff;
+}
+
+.button-primary:hover {
+    -fx-background-color: #4674aa;
+}
+
+.button-success {
+    -fx-background-color: #24523a;
+    -fx-border-color: #3c7a57;
+    -fx-text-fill: #c8f7c5;
+}
+
+.button-success:hover {
+    -fx-background-color: #2f6749;
+}
+
+.button-danger {
+    -fx-background-color: #63323d;
+    -fx-border-color: #8a4a58;
+    -fx-text-fill: #ffd6df;
+}
+
+.button-danger:hover {
+    -fx-background-color: #7a3d4a;
+}
+
+.button-compact {
+    -fx-font-size: 11px;
+    -fx-padding: 4 9;
+    -fx-min-height: 26;
+}
+
+.button-wide {
+    -fx-min-width: 96;
 }
 
 /* ── ProgressBar ───────────────────────────────────────────────────── */
