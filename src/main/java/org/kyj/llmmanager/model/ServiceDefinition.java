@@ -56,6 +56,9 @@ public class ServiceDefinition {
     /** 헬스체크 HTTP 경로 (기본값: /health) */
     private String healthCheckPath = "/health";
 
+    /** 프로세스 stdout/stderr 로그 디코딩 문자셋. null/blank이면 시스템 기본 인코딩 사용. */
+    private String logCharset;
+
     /** 서비스 정의를 동적으로 수정하는 Groovy 스크립트 (선택) */
     private String groovyScript;
 
@@ -94,6 +97,8 @@ public class ServiceDefinition {
     public void setPort(Integer port) { this.port = port; }
     public String getHealthCheckPath() { return healthCheckPath; }
     public void setHealthCheckPath(String healthCheckPath) { this.healthCheckPath = healthCheckPath; }
+    public String getLogCharset() { return logCharset; }
+    public void setLogCharset(String logCharset) { this.logCharset = logCharset; }
     public String getGroovyScript() { return groovyScript; }
     public void setGroovyScript(String groovyScript) { this.groovyScript = groovyScript; }
     public boolean isBuiltin() { return builtin; }

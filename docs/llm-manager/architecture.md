@@ -96,8 +96,13 @@ LlmManagerApp.start()
 OSHI를 통해 각 RUNNING 서비스의 RSS·가상 메모리도 주기적으로 수집한다.
 
 ### LogService
-`ProcessBuilder`의 stdout/stderr 스트림을 별도 스레드에서 읽어 `ServiceInstance.logs`에 추가한다.  
-로그 항목은 `ObservableList<LogEntry>`로 UI와 실시간 바인딩된다.
+`ProcessBuilder`의 stdout/stderr 스트림을 별도 스레드에서 읽어 내부 큐에 누적한다.
+100ms 주기 `log-flusher` 스레드가 큐를 감시하여 한 번에 최대 1000건을 JavaFX 스레드에서 일괄 반영한다.
+로그 폭주 시 `Platform.runLater()`가 과도하게 쌓이는 문제를 해소한다.
+
+- 스트림 디코딩 charset: `ServiceDefinition.logCharset`에 지정된 값(빈 값이면 시스템 기본값)으로 처리
+- 5000행 초과 시 앞 1000행을 제거하는 trim 로직을 `LogService.trimBeforeAdd()`가 담당
+- 로그 항목은 `ObservableList<LogEntry>`로 UI와 실시간 바인딩된다
 
 ### PidFileManager
 서비스 시작 시 PID를 파일로 저장하고 종료 시 삭제한다.  
@@ -128,8 +133,9 @@ OSHI 라이브러리로 CPU 사용률·물리 메모리를 수집한다.
 선택 파일은 상대 경로를 유지해 대상 프로젝트 디렉토리로 복사하며, `.git`, `node_modules`, `target`, `build`, `.gradle`, `.idea`, `.llm-backup*` 경로는 제외한다.
 
 ### LlmSkillLibraryRepository
-사용자가 로드한 스킬·룰 파일을 DB에 저장하기 위한 저장소 구현이다. SQLite, PostgreSQL, Oracle, MSSQL provider 분기를 포함하지만 2026-06-07 현재 `AppContext`나 UI에서 사용되지 않는다.
-또한 HikariCP 의존성, `AppSettings` 설정 필드, `SkillFile.libraryFileId` 모델 필드가 아직 연결되지 않아 이 클래스 때문에 `./gradlew build`가 실패한다.
+사용자가 로드한 스킬·룰 파일을 DB에 저장하기 위한 저장소 구현이다. SQLite, PostgreSQL, Oracle, MSSQL provider 분기를 포함한다.
+HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 의존성, `AppSettings` DB 설정 필드, `SkillFile.libraryFileId` 모델 필드가 모두 추가되어 컴파일은 통과한다.
+단, `AppContext`나 UI에서 아직 사용되지 않는다 — DB 기반 스킬 라이브러리 연결은 남아 있는 TODO다.
 
 ### DevHotReloader
 `-Pdev` 플래그로 실행 시 활성화.  
@@ -149,7 +155,7 @@ main.fxml (MainController)
   │     └─ FlowPane  ← 서비스 카드 목록 (메모리 바 + Canvas 스파크라인 포함)
   ├─ 중앙: detailTabPane (TabPane)     ← 서비스 선택 시 표시
   │     ├─ 개요 탭  (상태·PID·포트·업타임·시작/중지/재시작)
-  │     ├─ 로그 탭  (실시간 로그·필터·자동 스크롤)
+  │     ├─ 로그 탭  (실시간 로그·필터·자동 스크롤·인코딩 선택)
   │     ├─ 설정 탭  (argValues·envVars 편집·저장)
   │     └─ 설치 탭  (git clone·의존성 설치·진행률)
   └─ 팝업 다이얼로그
@@ -199,6 +205,10 @@ CLI 인수 (--key=value)
 | `--runtime.java-home=C:\Java\jdk21` | JAVA_HOME |
 | `--install.base=D:\llm-services` | 서비스 기본 설치 루트 |
 | `--monitor.health-check-interval=5` | 헬스체크 주기 (초) |
+| `--skill-library.db.provider=postgresql` | 스킬 라이브러리 DB 종류 (sqlite/postgresql/oracle/mssql) |
+| `--skill-library.db.url=jdbc:...` | 스킬 라이브러리 JDBC URL |
+| `--skill-library.db.username=...` | 스킬 라이브러리 DB 사용자명 |
+| `--skill-library.db.password=...` | 스킬 라이브러리 DB 비밀번호 |
 
 ---
 
@@ -209,7 +219,8 @@ CLI 인수 (--key=value)
 | JavaFX Application Thread | UI 렌더링, 이벤트 처리. `Platform.runLater()`로만 UI 접근 |
 | `start-{name}` | 서비스 프로세스 실행 및 종료 코드 대기 |
 | `stop-{name}` | 프로세스 종료 처리 (taskkill / destroy) |
-| `log-stdout-{name}` / `log-stderr-{name}` | 프로세스 출력 스트리밍 |
+| `log-stdout-{name}` / `log-stderr-{name}` | 프로세스 출력 스트리밍 → pendingLogs 큐에 적재 |
+| `log-flusher` | 100ms 주기로 pendingLogs 큐를 드레인 → JavaFX 스레드에 일괄 반영 |
 | `uptime-timer` | 1초 주기 업타임 레이블 갱신 |
 | `health-monitor` | intervalSeconds(기본 10초) 주기 HTTP 헬스체크 + 메모리 수집 |
 | `system-monitor` | CPU·메모리 수집 |
@@ -268,17 +279,19 @@ llm-skills/
 
 ---
 
-## 현재 빌드 이슈 (2026-06-07)
+## 빌드 상태 (2026-06-07)
 
-`./gradlew build`는 `LlmSkillLibraryRepository`에서 컴파일 실패한다.
+`./gradlew build` 정상 통과.
 
-| 누락 영역 | 증상 |
-|----------|------|
-| Gradle 의존성 | `com.zaxxer.hikari.HikariConfig`, `HikariDataSource` 패키지를 찾지 못함 |
-| `AppSettings` | `getSkillLibraryDbProvider()`, `getSkillLibraryDbUrl()` 등 DB 설정 getter가 없음 |
-| `SkillFile` | DB 로드 결과를 담는 `setLibraryFileId(long)` 메서드가 없음 |
+이전에 빌드를 막던 세 가지 문제가 모두 해소되었다.
 
-현재 실행 가능한 UI 흐름은 `LlmSkillsInstallController`의 내장 팩 설치와 `LlmSkillsLoadController`의 파일 복사 로드이다. DB 기반 스킬 라이브러리는 연결 작업이 남아 있다.
+| 해소 항목 | 변경 내용 |
+|----------|----------|
+| Gradle 의존성 | HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 추가 |
+| `AppSettings` | `getSkillLibraryDb*()` / `setSkillLibraryDb*()` getter·setter 추가 |
+| `SkillFile` | `libraryFileId` 필드 + getter/setter 추가 |
+
+현재 실행 가능한 UI 흐름은 `LlmSkillsInstallController`의 내장 팩 설치와 `LlmSkillsLoadController`의 파일 복사 로드이다. DB 기반 스킬 라이브러리(`LlmSkillLibraryRepository`)는 `AppContext` 및 UI 연결 작업이 남아 있다.
 
 ---
 

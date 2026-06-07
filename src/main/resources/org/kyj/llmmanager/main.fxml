@@ -23,7 +23,8 @@
                 <MenuItem text="API 서비스"   onAction="#onOpenApiServer" accelerator="Ctrl+Shift+A"/>
             </Menu>
             <Menu text="도구">
-                <MenuItem text="LLM 스킬"    onAction="#onLlmSkills"/>
+                <MenuItem text="LLM 스킬 설치" onAction="#onLlmSkillsInstall"/>
+                <MenuItem text="LLM 스킬 로드" onAction="#onLlmSkillsLoad"/>
             </Menu>
             <Menu text="설정">
                 <MenuItem text="환경설정"     onAction="#onSettings"      accelerator="Ctrl+Comma"/>
@@ -189,6 +190,9 @@
                                         <TextField fx:id="filterField" promptText="필터..."
                                                    prefWidth="180" onAction="#onFilter"/>
                                         <CheckBox fx:id="autoScrollCheck" text="자동 스크롤" selected="true"/>
+                                        <Label text="인코딩"/>
+                                        <ComboBox fx:id="logEncodingCombo" prefWidth="150"
+                                                  onAction="#onLogEncodingChanged"/>
                                         <Button text="지우기" onAction="#onClear"/>
                                     </HBox>
                                     <TextArea fx:id="logArea" VBox.vgrow="ALWAYS"

@@ -10,7 +10,6 @@ import org.kyj.llmmanager.model.AppSettings;
 import org.kyj.llmmanager.model.LlmTool;
 import org.kyj.llmmanager.model.SkillFile;
 import org.kyj.llmmanager.model.SkillPack;
-import org.kyj.llmmanager.util.PlatformUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,8 +33,8 @@ public class LlmSkillLibraryRepository implements Closeable {
     private static final Logger log = LoggerFactory.getLogger(LlmSkillLibraryRepository.class);
 
     private static final String DB_FILE_NAME = "skill-library.sqlite";
-    private static final String TOOL_ID = "loaded-skill-library";
-    private static final String PACK_ID = "loaded-skill-library-files";
+    private static final String TOOL_ID = "cursor-library";
+    private static final String PACK_ID = "cursor-library-loaded";
     private static final String IDENTIFIER_PATTERN = "[A-Za-z_][A-Za-z0-9_]*";
 
     private final AppSettings settings;
@@ -380,15 +379,16 @@ public class LlmSkillLibraryRepository implements Closeable {
             return configured;
         }
         if ("sqlite".equals(provider)) {
-            // 런타임 데이터는 모두 PlatformUtil.getAppHome() 아래에 저장한다.
-            return "jdbc:sqlite:" + PlatformUtil.getAppHome().resolve(DB_FILE_NAME)
+            return "jdbc:sqlite:" + resolveDefaultProjectRoot()
+                    .resolve("lib").resolve("cursor").resolve(DB_FILE_NAME)
                     .toAbsolutePath().normalize();
         }
         return switch (provider) {
             case "postgresql" -> "jdbc:postgresql://localhost:5432/llm_manager";
             case "oracle" -> "jdbc:oracle:thin:@localhost:1521/FREEPDB1";
             case "mssql" -> "jdbc:sqlserver://localhost:1433;databaseName=llm_manager;encrypt=true;trustServerCertificate=true";
-            default -> "jdbc:sqlite:" + PlatformUtil.getAppHome().resolve(DB_FILE_NAME)
+            default -> "jdbc:sqlite:" + resolveDefaultProjectRoot()
+                    .resolve("lib").resolve("cursor").resolve(DB_FILE_NAME)
                     .toAbsolutePath().normalize();
         };
     }
@@ -423,5 +423,19 @@ public class LlmSkillLibraryRepository implements Closeable {
             return "." + path;
         }
         return path;
+    }
+
+    private static Path resolveDefaultProjectRoot() {
+        Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        Path cursor = current;
+        while (cursor != null) {
+            if (Files.exists(cursor.resolve("build.gradle")) ||
+                Files.exists(cursor.resolve("settings.gradle")) ||
+                Files.exists(cursor.resolve(".git"))) {
+                return cursor;
+            }
+            cursor = cursor.getParent();
+        }
+        return current;
     }
 }

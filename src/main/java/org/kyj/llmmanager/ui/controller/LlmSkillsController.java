@@ -32,6 +32,23 @@ public class LlmSkillsController implements Initializable {
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
-        // 서브 컨트롤러는 FXMLLoader가 자동으로 초기화한다
+        if (tabPane != null) {
+            tabPane.getSelectionModel().selectedIndexProperty().addListener((obs, old, selected) -> {
+                if (selected != null && selected.intValue() == 0 && installController != null) {
+                    installController.reloadTools();
+                }
+            });
+        }
+    }
+
+    /** 설치 탭을 선택한다. */
+    public void selectInstallTab() {
+        if (tabPane != null) tabPane.getSelectionModel().select(0);
+        if (installController != null) installController.reloadTools();
+    }
+
+    /** 로드 탭을 선택한다. */
+    public void selectLoadTab() {
+        if (tabPane != null) tabPane.getSelectionModel().select(1);
     }
 }

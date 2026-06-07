@@ -12,6 +12,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LlmSkillLibraryRepositoryTest {
 
@@ -34,13 +35,27 @@ class LlmSkillLibraryRepositoryTest {
 
             List<LlmTool> tools = repo.loadTools();
             assertEquals(1, tools.size());
-            assertEquals("loaded-skill-library", tools.get(0).getId());
+            assertEquals("cursor-library", tools.get(0).getId());
+            assertEquals("cursor-library-loaded", tools.get(0).getPacks().get(0).getId());
 
             List<SkillFile> files = tools.get(0).getPacks().get(0).getFiles();
             assertEquals(1, files.size());
             assertEquals(".cursor/rules/java.mdc", files.get(0).getTargetPath());
             assertFalse(files.get(0).isTemplate());
             assertEquals("Always write tests.", repo.readContent(files.get(0).getLibraryFileId()));
+        }
+    }
+
+    @Test
+    void defaultSqliteLocationKeepsV101CursorLibraryPath() {
+        AppSettings settings = new AppSettings();
+        settings.setSkillLibraryDbProvider("sqlite");
+        settings.setSkillLibraryDbUrl("");
+
+        try (LlmSkillLibraryRepository repo = new LlmSkillLibraryRepository(settings)) {
+            String normalized = repo.getDatabaseLocation().replace('\\', '/');
+            assertTrue(normalized.endsWith("/lib/cursor/skill-library.sqlite"),
+                    () -> "unexpected default SQLite location: " + repo.getDatabaseLocation());
         }
     }
 }

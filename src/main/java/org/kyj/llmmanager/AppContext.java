@@ -65,7 +65,8 @@ public class AppContext {
                 appSettingsRepository.get().getHealthCheckInterval());
         healthMonitor.start();
 
-        llmSkillInstaller = new LlmSkillInstaller();
+        llmSkillInstaller = new LlmSkillInstaller(
+                new LlmSkillLibraryRepository(appSettingsRepository.get()));
         projectRegistry = new ProjectRegistry();
         projectRegistry.load();
 
@@ -109,6 +110,7 @@ public class AppContext {
         if (apiServer != null)     apiServer.stop();
         if (processManager != null) processManager.stopAllSync();
         if (logService != null)    logService.shutdown();
+        if (llmSkillInstaller != null) llmSkillInstaller.shutdown();
         if (systemMonitor != null) systemMonitor.stop();
         if (trayManager != null)   trayManager.remove();
     }

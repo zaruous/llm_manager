@@ -11,6 +11,7 @@ public class SkillFile {
     private String resourcePath;  // classpath 기준 경로
     private String targetPath;    // 프로젝트 루트 기준 상대 경로
     private boolean template;     // {{변수}} 치환 여부
+    private Long libraryFileId;   // DB 라이브러리 파일 ID
 
     public SkillFile() {}
 
@@ -20,4 +21,6 @@ public class SkillFile {
     public void setTargetPath(String targetPath) { this.targetPath = targetPath; }
     public boolean isTemplate() { return template; }
     public void setTemplate(boolean template) { this.template = template; }
+    public Long getLibraryFileId() { return libraryFileId; }
+    public void setLibraryFileId(Long libraryFileId) { this.libraryFileId = libraryFileId; }
 }

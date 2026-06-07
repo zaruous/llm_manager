@@ -15,17 +15,17 @@
                 <Label text="소스 디렉토리:" GridPane.columnIndex="0" GridPane.rowIndex="0"
                        style="-fx-text-fill: #aaaaaa;"/>
                 <HBox spacing="8" GridPane.columnIndex="1" GridPane.rowIndex="0">
-                    <TextField fx:id="sourceDirField" prefWidth="360"
+                    <TextField fx:id="sourceDirField" prefWidth="560"
                                promptText="스킬/룰 파일이 있는 디렉토리"/>
                     <Button text="📁 찾아보기" onAction="#onBrowseSource"/>
                     <Button text="🔍 스캔" onAction="#onScan"/>
                 </HBox>
-                <Label text="대상 프로젝트:" GridPane.columnIndex="0" GridPane.rowIndex="1"
+                <Label text="DB 라이브러리:" GridPane.columnIndex="0" GridPane.rowIndex="1"
                        style="-fx-text-fill: #aaaaaa;"/>
                 <HBox spacing="8" GridPane.columnIndex="1" GridPane.rowIndex="1">
-                    <TextField fx:id="targetDirField" prefWidth="360"
-                               promptText="로드할 대상 프로젝트 디렉토리"/>
-                    <Button text="📁 찾아보기" onAction="#onBrowseTarget"/>
+                    <TextField fx:id="targetDirField" prefWidth="560"
+                               editable="false"
+                               promptText="skill-library DB 위치"/>
                 </HBox>
             </GridPane>
             <Separator/>
@@ -46,7 +46,7 @@
                     <Label fx:id="fileCountLabel"
                            style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
                 </HBox>
-                <ListView fx:id="fileListView" VBox.vgrow="ALWAYS"/>
+                <TreeView fx:id="fileTreeView" VBox.vgrow="ALWAYS" showRoot="false"/>
             </VBox>
 
             <!-- 오른쪽: 파일 내용 미리보기 -->
@@ -64,8 +64,10 @@
         <HBox spacing="12" style="-fx-padding: 12 20;" alignment="CENTER_LEFT">
             <Button fx:id="loadBtn" text="✓ 로드" onAction="#onLoad"
                     style="-fx-background-color: #336699; -fx-font-size: 13px; -fx-padding: 6 20;"/>
-            <Label text="※ 선택한 파일을 대상 프로젝트에 복사합니다. 기존 파일은 덮어씁니다."
-                   style="-fx-text-fill: #888888; -fx-font-size: 11px;"/>
+            <Label text="※ 선택한 파일 구조와 내용을 설정된 DB provider에 저장합니다. 설치 탭에서 DB로부터 파일을 씁니다."
+                   wrapText="true" maxWidth="Infinity"
+                   style="-fx-text-fill: #888888; -fx-font-size: 11px;"
+                   HBox.hgrow="ALWAYS"/>
         </HBox>
     </bottom>
 </BorderPane>

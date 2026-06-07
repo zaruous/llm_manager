@@ -975,13 +975,27 @@ public class MainController implements Initializable {
     }
 
     @FXML
-    private void onLlmSkills() {
+    private void onLlmSkillsInstall() {
+        openLlmSkills(false);
+    }
+
+    @FXML
+    private void onLlmSkillsLoad() {
+        openLlmSkills(true);
+    }
+
+    private void openLlmSkills(boolean loadTab) {
         try {
             FXMLLoader loader = new FXMLLoader(
                 getClass().getResource("/org/kyj/llmmanager/llm-skills.fxml"));
             Stage stage = new Stage();
             stage.setTitle("LLM 스킬 & 룰 설치");
-            stage.setScene(SceneFactory.create(loader.load()));  // FXML prefWidth/prefHeight 그대로 사용
+            stage.setScene(SceneFactory.create(loader.load(), 1240, 760));
+            LlmSkillsController controller = loader.getController();
+            if (loadTab) controller.selectLoadTab();
+            else controller.selectInstallTab();
+            stage.setMinWidth(1120);
+            stage.setMinHeight(680);
             stage.initOwner(menuBar.getScene().getWindow());
             stage.initModality(Modality.NONE);
             stage.show();

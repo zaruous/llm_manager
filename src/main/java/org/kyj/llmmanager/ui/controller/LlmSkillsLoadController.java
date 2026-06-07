@@ -4,14 +4,13 @@
  */
 package org.kyj.llmmanager.ui.controller;
 
+import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.LoadFileEntry;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
+import org.kyj.llmmanager.service.LlmSkillInstaller;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.*;
-import javafx.scene.control.cell.CheckBoxListCell;
-import javafx.scene.layout.VBox;
+import javafx.scene.control.cell.CheckBoxTreeCell;
 import javafx.stage.DirectoryChooser;
 
 import java.io.File;
@@ -25,31 +24,46 @@ import java.util.stream.Collectors;
 /**
  * LLM 스킬 & 룰 로드 탭 컨트롤러.
  * 지정한 소스 디렉토리를 스캔해 파일 목록을 나열하고,
- * 선택한 파일을 대상 프로젝트 경로로 복사한다.
+ * 선택한 파일 구조와 내용을 프로젝트 lib/cursor SQLite 저장소에 적재한다.
  */
 public class LlmSkillsLoadController implements Initializable {
 
     @FXML private TextField sourceDirField;
     @FXML private TextField targetDirField;
-    @FXML private ListView<LoadFileEntry> fileListView;
+    @FXML private TreeView<LoadFileEntry> fileTreeView;
     @FXML private TextArea previewArea;
     @FXML private Label fileCountLabel;
     @FXML private Button loadBtn;
 
-    /** 스캔 결과 파일 목록. CheckBoxListCell에 바인딩된다. */
-    private final ObservableList<LoadFileEntry> fileEntries = FXCollections.observableArrayList();
+    /** 스캔 결과 파일 목록. 실제 저장 대상 파일만 담는다. */
+    private final List<LoadFileEntry> fileEntries = new ArrayList<>();
+
+    /** TreeView 루트. 화면에는 표시하지 않는다. */
+    private CheckBoxTreeItem<LoadFileEntry> treeRoot;
+
+    /** 디렉토리 체크 상태 변경 시 하위 노드를 일괄 갱신하는 중인지 여부. */
+    private boolean updatingTreeSelection;
 
     /** 현재 스캔된 소스 루트 경로. null이면 미스캔 상태. */
     private Path sourceRoot;
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
-        fileListView.setItems(fileEntries);
-        // CheckBoxListCell: LoadFileEntry.selectedProperty()를 체크박스에 자동 바인딩
-        fileListView.setCellFactory(CheckBoxListCell.forListView(LoadFileEntry::selectedProperty));
+        targetDirField.setText(AppContext.getInstance().getLlmSkillInstaller()
+                .getLibraryRepository().getDatabaseLocation());
 
-        fileListView.getSelectionModel().selectedItemProperty().addListener(
-                (obs, old, sel) -> { if (sel != null) showPreview(sel); });
+        treeRoot = createTreeItem(new LoadFileEntry("", "root", true));
+        treeRoot.setExpanded(true);
+        fileTreeView.setRoot(treeRoot);
+        fileTreeView.setShowRoot(false);
+        fileTreeView.setCellFactory(CheckBoxTreeCell.forTreeView());
+
+        fileTreeView.getSelectionModel().selectedItemProperty().addListener(
+                (obs, old, sel) -> {
+                    if (sel == null || sel.getValue() == null) return;
+                    LoadFileEntry entry = sel.getValue();
+                    if (!entry.isDirectory()) showPreview(entry);
+                });
     }
 
     @FXML
@@ -92,6 +106,7 @@ public class LlmSkillsLoadController implements Initializable {
         }
 
         fileEntries.clear();
+        treeRoot.getChildren().clear();
         previewArea.clear();
 
         try {
@@ -105,6 +120,7 @@ public class LlmSkillsLoadController implements Initializable {
                     .collect(Collectors.toList());
 
             fileEntries.addAll(found);
+            buildFileTree(found);
             fileCountLabel.setText(found.size() + "개 파일 발견");
 
             if (found.isEmpty()) {
@@ -132,6 +148,12 @@ public class LlmSkillsLoadController implements Initializable {
                 return true;
             }
         }
+        String fileName = path.getFileName().toString().toLowerCase();
+        if (fileName.equals(".env") || fileName.endsWith(".key") ||
+            fileName.endsWith(".pem") || fileName.contains("token") ||
+            fileName.contains("pat")) {
+            return true;
+        }
         return false;
     }
 
@@ -152,12 +174,12 @@ public class LlmSkillsLoadController implements Initializable {
 
     @FXML
     private void onSelectAll() {
-        fileEntries.forEach(e -> e.setSelected(true));
+        setTreeSelected(treeRoot, true);
     }
 
     @FXML
     private void onDeselectAll() {
-        fileEntries.forEach(e -> e.setSelected(false));
+        setTreeSelected(treeRoot, false);
     }
 
     /**
@@ -184,59 +206,123 @@ public class LlmSkillsLoadController implements Initializable {
     }
 
     /**
-     * 선택된 파일들을 소스 디렉토리에서 대상 프로젝트로 복사한다.
-     * 상대 경로를 유지하므로 디렉토리 구조가 그대로 재현된다.
+     * 선택된 파일들을 소스 디렉토리에서 SQLite 라이브러리로 저장한다.
      */
     @FXML
     private void onLoad() {
-        String targetPath = targetDirField.getText().trim();
-        if (targetPath.isBlank()) {
-            alert("대상 프로젝트 디렉토리를 선택하세요.");
-            return;
-        }
         if (sourceRoot == null || fileEntries.isEmpty()) {
             alert("소스 디렉토리를 먼저 스캔하세요.");
             return;
         }
 
-        List<LoadFileEntry> selected = fileEntries.stream()
-                .filter(LoadFileEntry::isSelected)
-                .collect(Collectors.toList());
+        List<LoadFileEntry> selected = getSelectedFiles();
 
         if (selected.isEmpty()) {
             alert("로드할 파일을 선택하세요.");
             return;
         }
 
-        Path targetRoot = Path.of(targetPath);
-        List<String> copied = new ArrayList<>();
-        List<String> errors = new ArrayList<>();
+        try {
+            LlmSkillInstaller installer = AppContext.getInstance().getLlmSkillInstaller();
+            List<String> relativePaths = selected.stream()
+                    .map(LoadFileEntry::getRelativePath)
+                    .collect(Collectors.toList());
+            int saved = installer.getLibraryRepository().saveFiles(sourceRoot, relativePaths);
+            installer.refreshLibrary();
 
-        for (LoadFileEntry entry : selected) {
-            Path src = sourceRoot.resolve(entry.getRelativePath());
-            Path dest = targetRoot.resolve(entry.getRelativePath());
-            try {
-                if (dest.getParent() != null) Files.createDirectories(dest.getParent());
-                Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
-                copied.add(entry.getRelativePath());
-            } catch (IOException e) {
-                errors.add(entry.getRelativePath() + ": " + e.getMessage());
-            }
+            StringBuilder msg = new StringBuilder();
+            msg.append("DB Provider: ")
+               .append(installer.getLibraryRepository().getProvider())
+               .append("\n")
+               .append("DB 위치: ")
+               .append(installer.getLibraryRepository().getDatabaseLocation())
+               .append("\n\n")
+               .append("✓ 로드 완료 (").append(saved).append("개):\n")
+               .append(relativePaths.stream().map(s -> "  " + s).collect(Collectors.joining("\n")))
+               .append("\n\n설치 탭에서 '로드된 Cursor 라이브러리'를 선택하면 DB에서 파일을 씁니다.");
+
+            previewArea.setText(msg.toString());
+        } catch (Exception e) {
+            alert("SQLite 저장 오류: " + e.getMessage());
         }
-
-        StringBuilder msg = new StringBuilder();
-        if (!copied.isEmpty())
-            msg.append("✓ 완료 (").append(copied.size()).append("개):\n")
-               .append(copied.stream().map(s -> "  " + s).collect(Collectors.joining("\n")))
-               .append("\n\n");
-        if (!errors.isEmpty())
-            msg.append("✗ 오류 (").append(errors.size()).append("개):\n")
-               .append(errors.stream().map(s -> "  " + s).collect(Collectors.joining("\n")));
-
-        previewArea.setText(msg.toString());
     }
 
     private void alert(String msg) {
         new Alert(Alert.AlertType.INFORMATION, msg, ButtonType.OK).showAndWait();
+    }
+
+    /**
+     * 상대 경로 목록을 디렉토리 트리로 변환한다.
+     *
+     * @param entries 스캔된 파일 항목 목록
+     */
+    private void buildFileTree(List<LoadFileEntry> entries) {
+        treeRoot.getChildren().clear();
+        Map<String, CheckBoxTreeItem<LoadFileEntry>> dirs = new LinkedHashMap<>();
+        dirs.put("", treeRoot);
+
+        for (LoadFileEntry entry : entries) {
+            String relativePath = entry.getRelativePath();
+            String[] parts = relativePath.split("/");
+            CheckBoxTreeItem<LoadFileEntry> parent = treeRoot;
+            String currentPath = "";
+
+            for (int i = 0; i < parts.length - 1; i++) {
+                currentPath = currentPath.isBlank() ? parts[i] : currentPath + "/" + parts[i];
+                CheckBoxTreeItem<LoadFileEntry> existing = dirs.get(currentPath);
+                if (existing == null) {
+                    existing = createTreeItem(new LoadFileEntry(currentPath, parts[i], true));
+                    existing.setExpanded(true);
+                    parent.getChildren().add(existing);
+                    dirs.put(currentPath, existing);
+                }
+                parent = existing;
+            }
+
+            String fileName = parts.length == 0 ? relativePath : parts[parts.length - 1];
+            CheckBoxTreeItem<LoadFileEntry> fileItem =
+                    createTreeItem(new LoadFileEntry(relativePath, fileName, false));
+            parent.getChildren().add(fileItem);
+        }
+    }
+
+    private CheckBoxTreeItem<LoadFileEntry> createTreeItem(LoadFileEntry entry) {
+        CheckBoxTreeItem<LoadFileEntry> item = new CheckBoxTreeItem<>(entry);
+        item.setSelected(entry.isSelected());
+        item.selectedProperty().addListener((obs, old, selected) -> {
+            entry.setSelected(selected);
+            if (updatingTreeSelection || !entry.isDirectory()) return;
+            try {
+                updatingTreeSelection = true;
+                item.getChildren().forEach(child -> setTreeSelected(child, selected));
+            } finally {
+                updatingTreeSelection = false;
+            }
+        });
+        return item;
+    }
+
+    private void setTreeSelected(TreeItem<LoadFileEntry> item, boolean selected) {
+        if (item instanceof CheckBoxTreeItem<LoadFileEntry> cb) {
+            cb.setSelected(selected);
+            if (cb.getValue() != null) cb.getValue().setSelected(selected);
+        }
+        item.getChildren().forEach(child -> setTreeSelected(child, selected));
+    }
+
+    private List<LoadFileEntry> getSelectedFiles() {
+        List<LoadFileEntry> selected = new ArrayList<>();
+        collectSelectedFiles(treeRoot, selected);
+        return selected;
+    }
+
+    private void collectSelectedFiles(TreeItem<LoadFileEntry> item, List<LoadFileEntry> selected) {
+        if (item instanceof CheckBoxTreeItem<LoadFileEntry> cb) {
+            LoadFileEntry entry = cb.getValue();
+            if (entry != null && !entry.isDirectory() && cb.isSelected()) {
+                selected.add(entry);
+            }
+        }
+        item.getChildren().forEach(child -> collectSelectedFiles(child, selected));
     }
 }

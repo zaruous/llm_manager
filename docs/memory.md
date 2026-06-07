@@ -216,3 +216,57 @@ llm_manager/
 | 모델 필드 미연결 | `SkillFile`에 `setLibraryFileId(long)`가 없음 |
 
 `LlmSkillLibraryRepository`는 DB 기반 스킬 라이브러리 저장소로 보이지만 현재 `AppContext`나 UI 컨트롤러에서 사용되지 않는다. 현재 UI의 로드 탭은 선택 파일을 대상 프로젝트에 상대 경로 유지 복사한다.
+
+---
+
+## 세션 3 (2026-06-07)
+
+### 작업 목록
+
+| # | 작업 | 파일 | 상태 |
+|---|------|------|------|
+| 1 | 빌드 실패 해소 (HikariCP + sqlite-jdbc 추가) | `build.gradle` | ✅ |
+| 2 | AppSettings — skill library DB 설정 getter/setter 추가 | `AppSettings.java` | ✅ |
+| 3 | SkillFile — libraryFileId 필드 추가 | `SkillFile.java` | ✅ |
+| 4 | AppConfigLoader — skill-library.db YAML/CLI 파싱 추가 | `AppConfigLoader.java` | ✅ |
+| 5 | LogService — 큐 + 주기적 플러셔 방식 전면 개선 | `LogService.java` | ✅ |
+| 6 | ServiceDefinition — logCharset 필드 추가 | `ServiceDefinition.java` | ✅ |
+| 7 | 로그 탭 인코딩 선택 ComboBox 추가 | `MainController.java`, `main.fxml` | ✅ |
+| 8 | AppContext shutdown — logService.shutdown() 추가 | `AppContext.java` | ✅ |
+| 9 | sql-gen-mcp.json — TEI/Ollama/OpenAI/vLLM/Chroma ArgSpec 추가 | `lib/def/sql-gen-mcp.json` | ✅ |
+| 10 | swagger-mcp.json — Ollama/TEI/Chroma/pgvector/CodebaseMemory ArgSpec 추가 | `lib/def/swagger-mcp.json` | ✅ |
+| 11 | 문서 최신화 | `CLAUDE.md`, `architecture.md`, `service-configuration-flow.md`, `memory.md` | ✅ |
+
+### 변경 상세
+
+#### LogService 개선 — 큐 + 주기적 플러셔
+
+**변경 이유**: 로그 폭주 시 `Platform.runLater()`가 행 수만큼 쌓여 JavaFX Application Thread를 과부하.
+
+**구현**:
+- `ConcurrentLinkedQueue<QueuedLog>` — reader 스레드가 여기에 적재
+- `ScheduledExecutorService flusher` — 100ms 주기로 큐 감시
+- `scheduleFlush()` — `AtomicBoolean flushScheduled`로 중복 runLater 방지
+- `flushNow()` — 한 번에 최대 1000건 처리, 인스턴스별로 묶어 `addAll()` 호출
+- `trimBeforeAdd()` — 5000행 초과 시 1000행 제거 (기존 `ServiceInstance` 책임을 LogService로 이관)
+- `resolveCharset()` — `ServiceDefinition.logCharset` 값으로 스트림 디코딩 charset 결정
+
+#### 서비스별 로그 인코딩 선택
+
+**변경 이유**: Windows 환경에서 Python/Java 프로세스가 시스템 코드페이지(CP949)로 출력하는 경우 한글이 깨지는 문제.
+
+**구현**:
+- `ServiceDefinition.logCharset` 필드 추가 (JSON 직렬화 포함)
+- `main.fxml` 로그 탭 툴바에 `logEncodingCombo` ComboBox 추가
+- 선택지: 시스템 기본값 / UTF-8 / MS949 / EUC-KR / ISO-8859-1
+- 변경 즉시 `ServiceRegistry.update(def)`로 services.json에 저장
+- 이미 실행 중인 서비스는 다음 시작부터 적용 (시스템 로그 메시지로 안내)
+
+#### 서비스 정의 ArgSpec 확장
+
+| 파일 | 추가 ArgSpec 카테고리 |
+|------|----------------------|
+| `sql-gen-mcp.json` | TEI model-name/api-key, 임베딩 batch-size, Ollama/OpenAI/vLLM 임베딩 provider 설정, ChromaDB 컬렉션·테넌트·데이터베이스 설정 |
+| `swagger-mcp.json` | Ollama/TEI 임베딩 provider 설정, memory 스토어 파일 경로, Chroma/pgvector 벡터 스토어 설정, Codebase Memory MCP URL·타임아웃 설정 |
+
+모든 신규 ArgSpec은 `enabled: false`로 기본 비활성화.

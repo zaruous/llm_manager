@@ -32,15 +32,15 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 ./gradlew runDev
 ```
 
-## 현재 빌드 이슈
+## 빌드 상태
 
-2026-06-07 기준 `./gradlew build`는 `LlmSkillLibraryRepository`에서 실패한다.
+`./gradlew build` 정상 통과 (2026-06-07 기준).
 
-- HikariCP 의존성이 `build.gradle`에 없음
-- `AppSettings`에 `getSkillLibraryDb*()` 설정 getter가 없음
-- `SkillFile`에 `setLibraryFileId(long)`가 없음
+- HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 의존성 추가로 `LlmSkillLibraryRepository` 컴파일 해소
+- `AppSettings`에 `getSkillLibraryDb*()` getter 추가 완료
+- `SkillFile`에 `libraryFileId` 필드 및 getter/setter 추가 완료
 
-현재 UI의 "로드" 탭은 DB 저장이 아니라 선택 파일을 대상 프로젝트에 복사한다.
+현재 UI의 "로드" 탭은 선택 파일을 대상 프로젝트에 복사한다 (DB 저장은 미연결).
 
 ---
 

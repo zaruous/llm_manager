@@ -20,11 +20,11 @@ service-packs/*.yml          ← 2) 사용자 커스텀 템플릿 (수동 임포
 
 현재 제공 파일:
 
-| 파일 | 서비스 | 설치 방식 |
-|------|--------|-----------|
-| `bge-m3.json` | BGE-M3 Embedding Server (Python/FastAPI) | git clone + pip install |
-| `sql-gen-mcp.json` | SQL Gen MCP Server (Java) | `lib/` 번들 JAR 복사 |
-| `swagger-mcp.json` | Swagger MCP Server (Java) | `lib/` 번들 JAR 복사 |
+| 파일 | 서비스 | 설치 방식 | 주요 ArgSpec |
+|------|--------|-----------|-------------|
+| `bge-m3.json` | BGE-M3 Embedding Server (Python/FastAPI) | git clone + pip install | — |
+| `sql-gen-mcp.json` | SQL Gen MCP Server (Java) | `lib/` 번들 JAR 복사 | TEI/Ollama/OpenAI/vLLM 임베딩 provider, ChromaDB 벡터 스토어 |
+| `swagger-mcp.json` | Swagger MCP Server (Java) | `lib/` 번들 JAR 복사 | Ollama/TEI 임베딩 provider, Chroma/pgvector 벡터 스토어, Codebase Memory MCP 연동 |
 
 #### 경로 변수 (`installDir` 필드)
 
@@ -195,4 +195,4 @@ LlmSkillsLoadController.onScan()
 [로드] → 대상 프로젝트에 상대 경로 유지 복사 (기존 파일 덮어쓰기)
 ```
 
-`LlmSkillLibraryRepository`는 DB 기반 스킬 라이브러리 저장소 구현을 포함하지만 현재 UI 흐름에서는 사용되지 않는다. 2026-06-07 기준 이 클래스는 HikariCP 의존성, `AppSettings` DB 설정 필드, `SkillFile.libraryFileId` 연결이 없어 빌드 실패 원인이 된다.
+`LlmSkillLibraryRepository`는 DB 기반 스킬 라이브러리 저장소 구현을 포함한다. HikariCP 5.1.0, `AppSettings` DB 설정 필드, `SkillFile.libraryFileId` 연결이 완료되어 컴파일은 통과하지만 현재 UI 흐름에서는 아직 사용되지 않는다.
