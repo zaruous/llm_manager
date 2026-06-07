@@ -57,51 +57,6 @@
           { "resourcePath": "llm-skills/claude/CLAUDE.md",
             "targetPath": "CLAUDE.md", "template": true }
         ]
-      },
-      {
-        "id": "claude-commands",
-        "name": "커스텀 슬래시 명령어",
-        "tags": ["general"],
-        "files": [
-          { "resourcePath": "llm-skills/claude/commands/review.md",
-            "targetPath": ".claude/commands/review.md", "template": false },
-          { "resourcePath": "llm-skills/claude/commands/test.md",
-            "targetPath": ".claude/commands/test.md", "template": false }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "gemini",
-    "name": "Gemini CLI",
-    "emoji": "✨",
-    "description": "Google Gemini CLI 설정",
-    "packs": [
-      {
-        "id": "gemini-base",
-        "name": "GEMINI.md 기본 규칙",
-        "tags": ["general"],
-        "files": [
-          { "resourcePath": "llm-skills/gemini/GEMINI.md",
-            "targetPath": "GEMINI.md", "template": true }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "copilot",
-    "name": "GitHub Copilot",
-    "emoji": "🐙",
-    "description": "GitHub Copilot 지시사항",
-    "packs": [
-      {
-        "id": "copilot-base",
-        "name": "Copilot 지시사항",
-        "tags": ["general"],
-        "files": [
-          { "resourcePath": "llm-skills/copilot/copilot-instructions.md",
-            "targetPath": ".github/copilot-instructions.md", "template": true }
-        ]
       }
     ]
   }

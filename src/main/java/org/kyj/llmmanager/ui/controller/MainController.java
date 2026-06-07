@@ -771,11 +771,16 @@ public class MainController implements Initializable {
     }
 
     /**
-     * 서비스의 startCommand에서 JAR 파일명을 추출해 lib/ 폴더에서 파일을 탐색한다.
-     * 개발 환경({@code ./gradlew run})과 배포 환경 모두 CWD 기준 lib/ 폴더를 확인한다.
+     * 서비스의 startCommand에서 JAR 파일명을 추출해 번들 lib/ 폴더에서 파일을 탐색한다.
+     *
+     * <p>탐색 순서:
+     * <ol>
+     *   <li>배포 환경: 실행 중인 메인 JAR와 같은 디렉토리(app/lib/)에서 탐색</li>
+     *   <li>개발 환경 fallback: CWD 기준 lib/ 폴더</li>
+     * </ol>
      *
      * @param def 서비스 정의
-     * @return lib/ 에 존재하는 JAR File, 없으면 null
+     * @return 번들 lib/ 에 존재하는 JAR File, 없으면 null
      */
     private File findBundledJar(ServiceDefinition def) {
         String cmd = def.getStartCommand();
@@ -785,6 +790,16 @@ public class MainController implements Initializable {
         for (int i = 0; i < tokens.size() - 1; i++) {
             if ("-jar".equalsIgnoreCase(tokens.get(i))) {
                 String jarName = tokens.get(i + 1);
+                // 배포 환경: 메인 JAR가 위치한 lib/ 디렉토리에서 탐색 (BuiltinServiceLoader와 동일 방식)
+                try {
+                    Path codeLoc = Path.of(MainController.class
+                            .getProtectionDomain().getCodeSource().getLocation().toURI());
+                    if (Files.isRegularFile(codeLoc)) {
+                        File candidate = codeLoc.getParent().resolve(jarName).toFile();
+                        if (candidate.exists()) return candidate;
+                    }
+                } catch (Exception ignored) {}
+                // 개발 환경 fallback: CWD 기준 lib/
                 File bundled = Path.of("lib", jarName).toFile();
                 if (bundled.exists()) return bundled;
                 break;

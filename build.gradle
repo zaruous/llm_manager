@@ -138,6 +138,15 @@ distributions {
             from('lib/def') {
                 into('lib/def')
             }
+            from('lib/cursor') {
+                include 'skill-library.sqlite'
+                into 'lib/cursor'
+            }
+            from('lib') {
+                include 'sql-gen-mcp-1.0.0-SNAPSHOT.jar'
+                include 'swagger-mcp-server.jar'
+                into 'lib'
+            }
         }
     }
 }
@@ -176,14 +185,18 @@ tasks.register('generatePackageIcons') {
     }
 }
 
-// 1단계: installDist 결과물(JARs + lib/def/)을 jpackage 입력 디렉토리로 복사
+// 1단계: installDist 결과물의 lib/ 구조를 유지해 jpackage 입력 디렉토리로 복사
 tasks.register('prepareJpackageInput', Copy) {
     group       = 'distribution'
-    description = 'jpackage 입력 디렉토리를 준비합니다 (JARs + def/)'
+    description = 'jpackage 입력 디렉토리를 준비합니다 (lib/JARs + lib/def/)'
     dependsOn installDist
-    // build/install/<name>/lib/ 에는 이미 JARs 와 def/ 서브폴더가 있다
+    doFirst {
+        delete layout.buildDirectory.dir('jpackage-input')
+    }
+    // build/install/<name>/lib/ 에는 이미 JARs 와 def/ 서브폴더가 있다.
+    // jpackage 앱 내부에서도 app/lib/... 구조를 유지한다.
     from layout.buildDirectory.dir("install/${project.name}/lib")
-    into layout.buildDirectory.dir('jpackage-input')
+    into layout.buildDirectory.dir('jpackage-input/lib')
 }
 
 // 2-A: app-image (폴더 구조) — WiX 없이 빌드 가능, zip 으로 배포
@@ -191,22 +204,28 @@ tasks.register('jpackageImage', Exec) {
     group       = 'distribution'
     description = '앱 이미지(폴더)를 생성합니다 — WiX 없이 zip 배포 가능'
     dependsOn 'prepareJpackageInput', 'generatePackageIcons'
-    doFirst { commandLine buildJpackageArgs('app-image', project) }
+    doFirst {
+        cleanJpackageOutput('app-image', project)
+        commandLine buildJpackageArgs('app-image', project)
+    }
+    doLast {
+        stripBundledServiceJarsFromLauncherConfig(project)
+    }
 }
 
-// 2-B: 네이티브 인스톨러 (Windows MSI, macOS DMG, Linux DEB)
 // 2-B: 네이티브 인스톨러 (Windows EXE, macOS DMG, Linux DEB)
 tasks.register('jpackageExe', Exec) {
     group       = 'distribution'
     description = 'EXE/DMG/DEB 인스톨러를 생성합니다 (Windows: WiX 3.0+ 필요)'
-    dependsOn 'prepareJpackageInput', 'generatePackageIcons'
+    dependsOn 'jpackageImage'
     doFirst {
         def os   = org.gradle.internal.os.OperatingSystem.current()
         def type = os.windows ? 'exe' : (os.macOsX ? 'dmg' : 'deb')
+        cleanJpackageOutput(type, project)
         if (os.windows) {
             configureBundledWixPath(delegate, project)
         }
-        commandLine buildJpackageArgs(type, project)
+        commandLine buildJpackageInstallerArgs(type, project)
     }
 }
 
@@ -224,9 +243,13 @@ List<String> buildJpackageArgs(String type, Project proj) {
     def inputDir = proj.layout.buildDirectory.dir('jpackage-input').get().asFile
     outDir.mkdirs()
 
-    def mainJar    = "${proj.name}-${proj.version}.jar"
-    // JavaFX 모듈 목록 — 런타임에 $APPDIR(앱 설치 경로) 에서 로드
+    def mainJar    = "lib/${proj.name}-${proj.version}.jar"
+    // JavaFX 모듈 목록 — 런타임에 $APPDIR/lib(앱 설치 경로) 에서 로드
     def javafxMods = 'javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base'
+    def javafxModulePath = configurations.runtimeClasspath.files
+        .findAll { it.name.startsWith('javafx-') }
+        .collect { '$APPDIR/lib/' + it.name }
+        .join(File.pathSeparator)
 
     def cmd = [
         'jpackage',
@@ -239,8 +262,7 @@ List<String> buildJpackageArgs(String type, Project proj) {
         '--app-version', proj.version as String,
         '--main-jar',    mainJar,
         '--main-class',  'org.kyj.llmmanager.LlmManagerApp',
-        // $APPDIR: jpackage 런타임 매크로 → 설치된 app/ 디렉토리로 치환됨
-        '--java-options', '--module-path $APPDIR',
+        '--java-options', "--module-path ${javafxModulePath}",
         '--java-options', "--add-modules ${javafxMods}",
         '--java-options', '-Xmx512m',
         '--java-options', '--add-opens java.base/java.lang=ALL-UNNAMED',
@@ -273,7 +295,85 @@ List<String> buildJpackageArgs(String type, Project proj) {
             ]
         }
     }
+    if (type == 'app-image' && project.hasProperty('winConsole')) {
+        cmd += ['--win-console']
+    }
     return cmd
+}
+
+List<String> buildJpackageInstallerArgs(String type, Project proj) {
+    def outDir      = proj.layout.buildDirectory.dir('installer').get().asFile
+    def appImageDir = new File(outDir, 'LLMManager')
+
+    def cmd = [
+        'jpackage',
+        '--type',        type,
+        '--app-image',   appImageDir.absolutePath,
+        '--dest',        outDir.absolutePath,
+        '--name',        'LLMManager',
+        '--app-version', proj.version as String,
+    ]
+
+    def os = org.gradle.internal.os.OperatingSystem.current()
+    if (os.windows) {
+        cmd += [
+            '--win-dir-chooser',
+            '--win-menu',
+            '--win-shortcut',
+            '--win-menu-group', 'LLM Manager',
+            '--vendor',         'KYJ',
+            '--description',    'LLM Service Manager',
+        ]
+    } else if (os.macOsX) {
+        cmd += ['--mac-package-name', 'LLMManager']
+    } else {
+        cmd += [
+            '--linux-shortcut',
+            '--linux-menu-group', 'LLM Manager',
+            '--vendor',           'KYJ',
+        ]
+    }
+    return cmd
+}
+
+/**
+ * sql-gen/swagger 서버 JAR는 앱 실행 classpath가 아니라 서비스 설치 시 복사할 번들 파일이다.
+ * jpackage는 input 아래 JAR를 모두 classpath에 넣으므로, 앱 이미지 생성 후 런처 설정에서만 제거한다.
+ */
+void stripBundledServiceJarsFromLauncherConfig(Project proj) {
+    def cfg = proj.layout.buildDirectory
+            .file('installer/LLMManager/app/LLMManager.cfg')
+            .get().asFile
+    if (!cfg.exists()) return
+
+    def excluded = [
+        'sql-gen-mcp-1.0.0-SNAPSHOT.jar',
+        'swagger-mcp-server.jar',
+    ]
+    def original = cfg.readLines('UTF-8')
+    def filtered = original.findAll { line ->
+        !excluded.any { jar -> line.contains('\\' + jar) || line.contains('/' + jar) }
+    }
+    if (filtered.size() != original.size()) {
+        cfg.setText(filtered.join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
+        println "[jpackage] 런처 classpath에서 설치용 JAR 제외: ${excluded.join(', ')}"
+    }
+}
+
+/**
+ * jpackage는 기존 app-image 디렉토리가 있으면 실패한다.
+ * build/installer 아래에서 현재 패키징 태스크가 생성하는 산출물만 정리한다.
+ */
+void cleanJpackageOutput(String type, Project proj) {
+    def outDir = proj.layout.buildDirectory.dir('installer').get().asFile
+    if (type == 'app-image') {
+        delete new File(outDir, 'LLMManager')
+        delete new File(outDir, 'LLM Manager')
+    } else {
+        delete fileTree(outDir) {
+            include "LLMManager-${proj.version}.*"
+        }
+    }
 }
 
 File resolvePackageIconFile(Project proj) {
