@@ -142,6 +142,9 @@ distributions {
                 include 'skill-library.sqlite'
                 into 'lib/cursor'
             }
+            from('plugins') {
+                into 'lib/plugins'
+            }
             from('lib') {
                 include 'sql-gen-mcp-1.0.0-SNAPSHOT.jar'
                 include 'swagger-mcp-server.jar'

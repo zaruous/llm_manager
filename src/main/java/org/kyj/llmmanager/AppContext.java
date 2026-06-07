@@ -41,6 +41,12 @@ public class AppContext {
     private EmbeddedApiServer apiServer;
     /** 시스템 CPU·메모리 수집 서비스 (OSHI 기반). */
     private SystemMonitorService systemMonitor;
+    /** 로컬 플러그인 manifest 로더 및 registry. */
+    private PluginManager pluginManager;
+    /** 신뢰된 앱 내부 플러그인 command 실행기. */
+    private PluginCommandExecutor pluginCommandExecutor;
+    /** 플러그인 런타임 의존성 설치 서비스. */
+    private PluginDependencyInstaller pluginDependencyInstaller;
 
     private AppContext() {}
 
@@ -54,6 +60,10 @@ public class AppContext {
     public void init() {
         appSettingsRepository = new AppSettingsRepository();
         appSettingsRepository.load();
+        pluginManager = new PluginManager();
+        pluginManager.load();
+        pluginCommandExecutor = new PluginCommandExecutor(pluginManager, appSettingsRepository);
+        pluginDependencyInstaller = new PluginDependencyInstaller();
         devHotReloader    = new DevHotReloader();
         builtinServiceLoader = new BuiltinServiceLoader();
         serviceRegistry = new ServiceRegistry();
@@ -128,4 +138,7 @@ public class AppContext {
     public SystemTrayManager getTrayManager() { return trayManager; }
     public LlmSkillInstaller getLlmSkillInstaller() { return llmSkillInstaller; }
     public ProjectRegistry getProjectRegistry() { return projectRegistry; }
+    public PluginManager getPluginManager() { return pluginManager; }
+    public PluginCommandExecutor getPluginCommandExecutor() { return pluginCommandExecutor; }
+    public PluginDependencyInstaller getPluginDependencyInstaller() { return pluginDependencyInstaller; }
 }

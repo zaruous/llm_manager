@@ -25,6 +25,9 @@
             <Menu text="도구">
                 <MenuItem text="LLM 스킬 설치" onAction="#onLlmSkillsInstall"/>
                 <MenuItem text="LLM 스킬 로드" onAction="#onLlmSkillsLoad"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="플러그인 실행" onAction="#onRunPluginCommand"/>
+                <MenuItem text="플러그인 관리" onAction="#onPlugins"/>
             </Menu>
             <Menu text="설정">
                 <MenuItem text="환경설정"     onAction="#onSettings"      accelerator="Ctrl+Comma"/>

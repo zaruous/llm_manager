@@ -17,6 +17,8 @@ import javafx.animation.Timeline;
 import javafx.util.Duration;
 import org.kyj.llmmanager.ui.dialog.AddServiceDialog;
 import org.kyj.llmmanager.ui.dialog.HelpDialog;
+import org.kyj.llmmanager.ui.dialog.PluginCommandRunDialog;
+import org.kyj.llmmanager.ui.dialog.PluginManagerDialog;
 import org.kyj.llmmanager.ui.dialog.SettingsDialog;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -946,6 +948,16 @@ public class MainController implements Initializable {
     @FXML
     private void onSettings() {
         new SettingsDialog((Stage) menuBar.getScene().getWindow()).showAndWait();
+    }
+
+    @FXML
+    private void onPlugins() {
+        new PluginManagerDialog((Stage) menuBar.getScene().getWindow()).show();
+    }
+
+    @FXML
+    private void onRunPluginCommand() {
+        new PluginCommandRunDialog((Stage) menuBar.getScene().getWindow()).show();
     }
 
     /**

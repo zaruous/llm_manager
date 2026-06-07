@@ -1,0 +1,93 @@
+{
+  "id": "cursor-agent-runner",
+  "name": "Cursor Agent Runner",
+  "version": "0.1.0",
+  "type": "local",
+  "permissions": [
+    "filesystem.read",
+    "filesystem.write",
+    "process.exec",
+    "network"
+  ],
+  "install": {
+    "scope": "global",
+    "npmPackages": [
+      "@cursor/sdk@latest"
+    ]
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "cursor.runAgent",
+        "title": "Run Cursor Agent",
+        "description": "Run Cursor Agent in the selected working directory.",
+        "requires": {
+          "cwd": true,
+          "env": [
+            "CURSOR_API_KEY"
+          ]
+        }
+      }
+    ],
+    "settingsTabs": [
+      {
+        "id": "cursor.settings",
+        "title": "Cursor",
+        "order": 50,
+        "type": "schema",
+        "sections": [
+          {
+            "title": "Environment",
+            "fields": [
+              {
+                "key": "CURSOR_API_KEY",
+                "label": "API Key",
+                "kind": "env",
+                "required": true,
+                "secret": true
+              },
+              {
+                "key": "CURSOR_BASE_URL",
+                "label": "Base URL",
+                "kind": "env",
+                "required": false,
+                "secret": false
+              }
+            ]
+          },
+          {
+            "title": "Defaults",
+            "fields": [
+              {
+                "key": "cursor.defaultModel",
+                "label": "Default Model",
+                "kind": "select",
+                "defaultValue": "auto",
+                "options": [
+                  "auto",
+                  "composer-2"
+                ]
+              },
+              {
+                "key": "cursor.defaultCwd",
+                "label": "Default CWD",
+                "kind": "directory",
+                "defaultValue": ""
+              },
+              {
+                "key": "cursor.mode",
+                "label": "Mode",
+                "kind": "select",
+                "defaultValue": "sdk",
+                "options": [
+                  "sdk",
+                  "cli"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

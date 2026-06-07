@@ -7,6 +7,9 @@ package org.kyj.llmmanager.ui.dialog;
 import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.StartupManager;
 import org.kyj.llmmanager.model.AppSettings;
+import org.kyj.llmmanager.model.plugin.PluginSettingsField;
+import org.kyj.llmmanager.model.plugin.PluginSettingsSection;
+import org.kyj.llmmanager.service.PluginManager.PluginSettingsTabContribution;
 import org.kyj.llmmanager.util.PlatformUtil;
 import org.kyj.llmmanager.util.SceneFactory;
 import javafx.geometry.Insets;
@@ -19,7 +22,9 @@ import javafx.stage.Stage;
 
 import java.io.File;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 
 /**
  * 앱 환경설정 다이얼로그.
@@ -182,6 +187,8 @@ public class SettingsDialog {
         // ═══════════════════════════════════════════════════════════
         TabPane tabPane = new TabPane(runtimeTab, pathApiTab, startupTab);
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        List<Runnable> pluginSettingSavers = new ArrayList<>();
+        addPluginSettingsTabs(stage, tabPane, settings, pluginSettingSavers);
 
         // ── 하단 버튼 ──────────────────────────────────────────────
         Button saveBtn   = new Button("저장");
@@ -216,6 +223,7 @@ public class SettingsDialog {
             updated.setApiServerToken(apiTokenField.getText().trim());
             updated.setApiServerAllowUnauthenticatedControl(
                     allowUnauthenticatedControlCheck.isSelected());
+            pluginSettingSavers.forEach(Runnable::run);
 
             AppContext.getInstance().getAppSettingsRepository().save(updated);
 
@@ -331,6 +339,92 @@ public class SettingsDialog {
     private int parsePort(String text, int def) {
         try { return Integer.parseInt(text.trim()); }
         catch (NumberFormatException e) { return def; }
+    }
+
+    private void addPluginSettingsTabs(Stage stage, TabPane tabPane, AppSettings settings,
+                                       List<Runnable> savers) {
+        var pluginManager = AppContext.getInstance().getPluginManager();
+        if (pluginManager == null) return;
+
+        for (PluginSettingsTabContribution contribution : pluginManager.getSettingsTabs()) {
+            VBox box = new VBox(14);
+            box.setPadding(new Insets(14));
+
+            Label pluginLabel = new Label(contribution.pluginName());
+            pluginLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
+            box.getChildren().add(pluginLabel);
+
+            boolean firstSection = true;
+            for (PluginSettingsSection section : contribution.tab().getSections()) {
+                if (!firstSection) box.getChildren().add(new Separator());
+                firstSection = false;
+                if (section.getTitle() != null && !section.getTitle().isBlank()) {
+                    box.getChildren().add(sectionLabel(section.getTitle()));
+                }
+                GridPane grid = tabGrid();
+                int row = 0;
+                for (PluginSettingsField field : section.getFields()) {
+                    row = addPluginField(stage, grid, row, contribution.pluginId(), field,
+                            settings, savers);
+                }
+                box.getChildren().add(grid);
+            }
+
+            tabPane.getTabs().add(tab(contribution.tab().getTitle(), box));
+        }
+    }
+
+    private int addPluginField(Stage stage, GridPane grid, int row, String pluginId,
+                               PluginSettingsField field, AppSettings settings,
+                               List<Runnable> savers) {
+        String kind = field.getKind() == null ? "string" : field.getKind().trim().toLowerCase();
+        String label = field.getLabel() != null && !field.getLabel().isBlank()
+                ? field.getLabel() : field.getKey();
+        String suffix = field.isRequired() ? " *:" : ":";
+
+        if ("env".equals(kind)) {
+            String value = System.getenv(field.getKey());
+            Label state = new Label(value == null || value.isBlank() ? "미설정" : "감지됨");
+            state.setStyle(value == null || value.isBlank()
+                    ? "-fx-text-fill: #ffb86c;" : "-fx-text-fill: #8be9fd;");
+            Label envName = new Label(field.getKey());
+            envName.setStyle("-fx-text-fill: #aaaaaa;");
+            HBox envBox = new HBox(10, envName, state);
+            envBox.setAlignment(Pos.CENTER_LEFT);
+            grid.add(new Label(label + suffix), 0, row);
+            grid.add(envBox, 1, row, 2, 1);
+            return row + 1;
+        }
+
+        if ("select".equals(kind)) {
+            ComboBox<String> combo = new ComboBox<>();
+            combo.getItems().addAll(field.getOptions());
+            String current = settings.getPluginSetting(pluginId, field.getKey(), field.getDefaultValue());
+            if (current != null && !current.isBlank() && !combo.getItems().contains(current)) {
+                combo.getItems().add(current);
+            }
+            combo.setValue(current);
+            combo.setMaxWidth(Double.MAX_VALUE);
+            savers.add(() -> settings.setPluginSetting(pluginId, field.getKey(), combo.getValue()));
+            grid.add(new Label(label + suffix), 0, row);
+            grid.add(combo, 1, row, 2, 1);
+            return row + 1;
+        }
+
+        TextField textField = field.isSecret() ? new PasswordField() : new TextField();
+        textField.setText(settings.getPluginSetting(pluginId, field.getKey(), field.getDefaultValue()));
+        textField.setMaxWidth(Double.MAX_VALUE);
+        Button browse = null;
+        if ("directory".equals(kind)) {
+            browse = browseBtn(stage, textField);
+        }
+        savers.add(() -> {
+            if (!field.isSecret()) {
+                settings.setPluginSetting(pluginId, field.getKey(), textField.getText().trim());
+            }
+        });
+        addGridSection(grid, row, label + suffix, textField, browse);
+        return row + 1;
     }
 
     private String apiSwaggerUrl(String host, int port) {
