@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
+import java.util.Locale;
 
 public class ProjectRegistry {
     private static final Logger log = LoggerFactory.getLogger(ProjectRegistry.class);
@@ -36,7 +37,18 @@ public class ProjectRegistry {
         try {
             ProjectConfig[] arr = mapper.readValue(configFile.toFile(), ProjectConfig[].class);
             projects.clear();
-            projects.addAll(Arrays.asList(arr));
+            Map<String, ProjectConfig> byPath = new LinkedHashMap<>();
+            for (ProjectConfig project : Arrays.asList(arr)) {
+                String key = normalizeProjectPath(project.getPath());
+                if (key.isBlank()) {
+                    continue;
+                }
+                if (byPath.containsKey(key)) {
+                    byPath.remove(key);
+                }
+                byPath.put(key, project);
+            }
+            projects.addAll(byPath.values());
         } catch (IOException e) {
             log.error("Failed to load projects.json", e);
         }
@@ -54,7 +66,9 @@ public class ProjectRegistry {
     public List<ProjectConfig> getAll() { return new ArrayList<>(projects); }
 
     public void save(ProjectConfig config) {
-        projects.removeIf(p -> p.getId().equals(config.getId()));
+        String pathKey = normalizeProjectPath(config.getPath());
+        projects.removeIf(p -> p.getId().equals(config.getId())
+                || normalizeProjectPath(p.getPath()).equals(pathKey));
         projects.add(config);
         save();
     }
@@ -62,5 +76,17 @@ public class ProjectRegistry {
     public void remove(String id) {
         projects.removeIf(p -> p.getId().equals(id));
         save();
+    }
+
+    private static String normalizeProjectPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        String normalized = Path.of(path).toAbsolutePath().normalize().toString();
+        if (FileSystems.getDefault().supportedFileAttributeViews().contains("dos")
+                || System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+            return normalized.toLowerCase(Locale.ROOT);
+        }
+        return normalized;
     }
 }
