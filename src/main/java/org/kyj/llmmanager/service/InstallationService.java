@@ -5,6 +5,7 @@
 package org.kyj.llmmanager.service;
 
 import org.kyj.llmmanager.model.*;
+import org.kyj.llmmanager.util.CommandBuilder;
 import org.kyj.llmmanager.util.PlatformUtil;
 import javafx.application.Platform;
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * 서비스의 설치(git clone + 의존성 설치)와 설치 여부 확인을 담당한다.
@@ -147,21 +149,21 @@ public class InstallationService {
         String cmd = def.getStartCommand();
         if (cmd == null || cmd.isBlank()) return null;
 
-        String[] tokens = cmd.trim().split("\\s+");
+        List<String> tokens = CommandBuilder.splitCommand(cmd);
         String fileName = null;
 
         // Case 1: java -jar xxx.jar → -jar 다음 토큰
-        for (int i = 0; i < tokens.length - 1; i++) {
-            if ("-jar".equalsIgnoreCase(tokens[i])) {
-                fileName = tokens[i + 1];
+        for (int i = 0; i < tokens.size() - 1; i++) {
+            if ("-jar".equalsIgnoreCase(tokens.get(i))) {
+                fileName = tokens.get(i + 1);
                 break;
             }
         }
 
         // Case 2: python/node/shell → 첫 번째 커맨드 이후 파일 확장자가 있는 토큰
         if (fileName == null) {
-            for (int i = 1; i < tokens.length; i++) {
-                String t = tokens[i].replaceFirst("^\\.[\\\\/]", "");  // ./ 또는 .\ 제거
+            for (int i = 1; i < tokens.size(); i++) {
+                String t = tokens.get(i).replaceFirst("^\\.[\\\\/]", "");  // ./ 또는 .\ 제거
                 // 플래그(-로 시작), 모듈(-m 다음 모듈명), 콜론 포함(uvicorn main:app) 제외
                 if (!t.startsWith("-") && t.contains(".") && !t.contains(":")) {
                     fileName = t;

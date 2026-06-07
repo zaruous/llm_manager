@@ -83,7 +83,7 @@ public class AppContext {
         apiServer = new EmbeddedApiServer(this);
         var settings = appSettingsRepository.get();
         if (settings.isApiServerEnabled()) {
-            apiServer.start(settings.getApiServerPort());
+            apiServer.start(settings.getApiServerHost(), settings.getApiServerPort());
         }
 
         // JVM 강제 종료(Ctrl+C, SIGTERM) 시 실행 중인 서비스 프로세스를 정리한다.
@@ -105,11 +105,12 @@ public class AppContext {
      * 헬스모니터 중지 → 모든 서비스 프로세스 종료 → 트레이 제거.
      */
     public void shutdown() {
-        healthMonitor.stop();
-        processManager.stopAll();
-        trayManager.remove();
+        if (healthMonitor != null) healthMonitor.stop();
         if (apiServer != null)     apiServer.stop();
+        if (processManager != null) processManager.stopAllSync();
+        if (logService != null)    logService.shutdown();
         if (systemMonitor != null) systemMonitor.stop();
+        if (trayManager != null)   trayManager.remove();
     }
 
     public AppSettingsRepository getAppSettingsRepository() { return appSettingsRepository; }

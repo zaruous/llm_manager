@@ -18,6 +18,8 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 
 import java.io.File;
+import java.security.SecureRandom;
+import java.util.Base64;
 
 /**
  * 앱 환경설정 다이얼로그.
@@ -93,17 +95,47 @@ public class SettingsDialog {
         apiPortField.setPrefWidth(80);
         apiPortField.setMaxWidth(80);
 
-        Hyperlink apiLink = new Hyperlink("http://localhost:" + settings.getApiServerPort() + "/swagger-ui");
+        TextField apiHostField = new TextField(settings.getApiServerHost());
+        apiHostField.setPrefWidth(120);
+        apiHostField.setMaxWidth(120);
+        apiHostField.setPromptText("127.0.0.1");
+
+        PasswordField apiTokenField = new PasswordField();
+        apiTokenField.setText(settings.getApiServerToken());
+        apiTokenField.setPromptText("서비스 제어 API 토큰");
+        apiTokenField.setMaxWidth(Double.MAX_VALUE);
+
+        Button generateTokenBtn = new Button("생성");
+        generateTokenBtn.setOnAction(e -> apiTokenField.setText(generateToken()));
+
+        CheckBox allowUnauthenticatedControlCheck =
+                new CheckBox("서비스 시작/중지/재시작 API를 토큰 없이 허용");
+        allowUnauthenticatedControlCheck.setSelected(
+                settings.isApiServerAllowUnauthenticatedControl());
+
+        Hyperlink apiLink = new Hyperlink(apiSwaggerUrl(
+                settings.getApiServerHost(), settings.getApiServerPort()));
         apiLink.setStyle("-fx-font-size: 11px;");
         apiLink.setOnAction(e -> openBrowser(apiLink.getText()));
         apiPortField.textProperty().addListener((obs, old, val) ->
-            apiLink.setText("http://localhost:" + val + "/swagger-ui"));
+            apiLink.setText(apiSwaggerUrl(apiHostField.getText(), parsePort(val, 8185))));
+        apiHostField.textProperty().addListener((obs, old, val) ->
+            apiLink.setText(apiSwaggerUrl(val, parsePort(apiPortField.getText(), 8185))));
 
-        HBox apiPortRow = new HBox(8, new Label("포트:"), apiPortField, apiLink);
+        HBox apiPortRow = new HBox(8,
+                new Label("호스트:"), apiHostField,
+                new Label("포트:"), apiPortField,
+                apiLink);
         apiPortRow.setAlignment(Pos.CENTER_LEFT);
-        apiPortRow.setDisable(!settings.isApiServerEnabled());
+
+        HBox apiTokenRow = new HBox(8, new Label("제어 토큰:"), apiTokenField, generateTokenBtn);
+        apiTokenRow.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(apiTokenField, Priority.ALWAYS);
+
+        VBox apiSettingsBox = new VBox(8, apiPortRow, apiTokenRow, allowUnauthenticatedControlCheck);
+        apiSettingsBox.setDisable(!settings.isApiServerEnabled());
         apiEnabledCheck.selectedProperty().addListener((obs, old, val) ->
-            apiPortRow.setDisable(!val));
+            apiSettingsBox.setDisable(!val));
 
         Label apiNote = new Label("※ 저장 즉시 적용됩니다.");
         apiNote.setStyle("-fx-text-fill: #888888; -fx-font-size: 11px;");
@@ -111,7 +143,7 @@ public class SettingsDialog {
         pathApiBox.getChildren().addAll(
             installLbl, installGrid,
             new Separator(),
-            apiLbl, apiEnabledCheck, apiPortRow, apiNote
+            apiLbl, apiEnabledCheck, apiSettingsBox, apiNote
         );
 
         Tab pathApiTab = tab("경로 & API 서버", pathApiBox);
@@ -159,8 +191,12 @@ public class SettingsDialog {
         cancelBtn.setPrefWidth(80);
 
         saveBtn.setOnAction(e -> {
+            var apiServer = AppContext.getInstance().getApiServer();
+            String previousApiHost = apiServer.getHost();
+            int previousApiPort = apiServer.getPort();
+
             // 런타임 설정
-            AppSettings updated = new AppSettings();
+            AppSettings updated = settings;
             updated.setPythonCommand(pythonCmdField.getText().trim());
             updated.setPythonHome(pythonHomeField.getText().trim());
             updated.setNodeCommand(nodeCmdField.getText().trim());
@@ -172,17 +208,23 @@ public class SettingsDialog {
             // API 서버
             boolean apiEnabled = apiEnabledCheck.isSelected();
             int     apiPort    = parsePort(apiPortField.getText(), 8185);
+            String  apiHost    = apiHostField.getText().trim().isBlank()
+                    ? "127.0.0.1" : apiHostField.getText().trim();
             updated.setApiServerEnabled(apiEnabled);
             updated.setApiServerPort(apiPort);
+            updated.setApiServerHost(apiHost);
+            updated.setApiServerToken(apiTokenField.getText().trim());
+            updated.setApiServerAllowUnauthenticatedControl(
+                    allowUnauthenticatedControlCheck.isSelected());
 
             AppContext.getInstance().getAppSettingsRepository().save(updated);
 
             // API 서버 즉시 적용
-            var apiServer = AppContext.getInstance().getApiServer();
             if (apiEnabled && !apiServer.isRunning()) {
-                apiServer.start(apiPort);
-            } else if (apiEnabled && apiServer.isRunning() && apiServer.getPort() != apiPort) {
-                apiServer.start(apiPort);
+                apiServer.start(apiHost, apiPort);
+            } else if (apiEnabled && apiServer.isRunning()
+                    && (!previousApiHost.equals(apiHost) || previousApiPort != apiPort)) {
+                apiServer.start(apiHost, apiPort);
             } else if (!apiEnabled && apiServer.isRunning()) {
                 apiServer.stop();
             }
@@ -289,6 +331,18 @@ public class SettingsDialog {
     private int parsePort(String text, int def) {
         try { return Integer.parseInt(text.trim()); }
         catch (NumberFormatException e) { return def; }
+    }
+
+    private String apiSwaggerUrl(String host, int port) {
+        String browserHost = host == null || host.isBlank() || "0.0.0.0".equals(host.trim())
+                ? "localhost" : host.trim();
+        return "http://" + browserHost + ":" + port + "/swagger-ui";
+    }
+
+    private String generateToken() {
+        byte[] bytes = new byte[32];
+        new SecureRandom().nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     private void openBrowser(String url) {

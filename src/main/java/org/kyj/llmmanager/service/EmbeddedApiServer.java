@@ -9,11 +9,16 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
+import io.javalin.http.UnauthorizedResponse;
 import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.*;
 import org.kyj.llmmanager.util.CommandBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Map;
 
 /**
  * LLM Manager 내장 REST API 서버 (Javalin 기반).
@@ -38,6 +43,9 @@ public class EmbeddedApiServer {
     /** 현재 리슨 포트. 미실행이면 -1. */
     private int currentPort = -1;
 
+    /** 현재 바인딩 호스트. 기본값은 로컬 접근만 허용한다. */
+    private String currentHost = "127.0.0.1";
+
     public EmbeddedApiServer(AppContext ctx) {
         this.ctx = ctx;
     }
@@ -53,18 +61,30 @@ public class EmbeddedApiServer {
      * @param port 리슨할 HTTP 포트
      */
     public synchronized void start(int port) {
+        start("127.0.0.1", port);
+    }
+
+    /**
+     * 지정 호스트와 포트로 API 서버를 시작한다.
+     * 기본 설정은 127.0.0.1 바인딩으로 외부 접근을 차단한다.
+     *
+     * @param host 바인딩 호스트
+     * @param port 리슨할 HTTP 포트
+     */
+    public synchronized void start(String host, int port) {
         stop();
+        this.currentHost = normalizeHost(host);
         this.currentPort = port;
 
         app = Javalin.create(cfg -> {
             cfg.showJavalinBanner = false;
-            // CORS: 모든 오리진 허용 (개발·로컬 환경 대상)
-            cfg.bundledPlugins.enableCors(cors -> cors.addRule(r -> r.anyHost()));
         });
 
         registerRoutes();
-        app.start(port);
-        log.info("[API] LLM Manager API 서버 시작 → http://localhost:{}/swagger-ui", port);
+        app.exception(UnauthorizedResponse.class, (e, ctx) ->
+                ctx.status(e.getStatus()).json(Map.of("error", e.getMessage())));
+        app.start(currentHost, port);
+        log.info("[API] LLM Manager API 서버 시작 → http://{}:{}/swagger-ui", currentHost, port);
     }
 
     /** API 서버를 중지한다. 미실행 상태이면 무시. */
@@ -82,6 +102,9 @@ public class EmbeddedApiServer {
     /** 현재 리슨 포트를 반환한다. 미실행이면 -1. */
     public int getPort() { return currentPort; }
 
+    /** 현재 바인딩 호스트를 반환한다. */
+    public String getHost() { return currentHost; }
+
     // =========================================================
     // 라우트 등록
     // =========================================================
@@ -96,6 +119,9 @@ public class EmbeddedApiServer {
         });
 
         // ── 서비스 API ──
+        app.before("/api/services/{id}/start",   this::requireControlAuth);
+        app.before("/api/services/{id}/stop",    this::requireControlAuth);
+        app.before("/api/services/{id}/restart", this::requireControlAuth);
         app.get("/api/services",              this::handleListServices);
         app.get("/api/services/{id}",         this::handleGetService);
         app.post("/api/services/{id}/start",  this::handleStart);
@@ -130,7 +156,10 @@ public class EmbeddedApiServer {
     private void handleGetService(Context ctx) {
         String id = ctx.pathParam("id");
         ServiceDefinition def = findDef(id);
-        if (def == null) { ctx.status(404).json("{\"error\":\"서비스를 찾을 수 없습니다.\"}"); return; }
+        if (def == null) {
+            errorResponse(ctx, 404, "서비스를 찾을 수 없습니다.");
+            return;
+        }
 
         ServiceInstance inst = this.ctx.getProcessManager().getOrCreate(def);
         jsonResponse(ctx, serviceNode(def, inst));
@@ -141,11 +170,11 @@ public class EmbeddedApiServer {
         ServiceInstance inst = findInst(ctx);
         if (inst == null) return;
         if (inst.getStatus() == ServiceStatus.RUNNING) {
-            ctx.status(409).json("{\"error\":\"이미 실행 중입니다.\"}");
+            errorResponse(ctx, 409, "이미 실행 중입니다.");
             return;
         }
         this.ctx.getProcessManager().start(inst);
-        ctx.json("{\"result\":\"start 요청 완료\"}");
+        resultResponse(ctx, "start 요청 완료");
     }
 
     /** 서비스를 중지한다. */
@@ -153,11 +182,11 @@ public class EmbeddedApiServer {
         ServiceInstance inst = findInst(ctx);
         if (inst == null) return;
         if (inst.getStatus() != ServiceStatus.RUNNING) {
-            ctx.status(409).json("{\"error\":\"실행 중이 아닙니다.\"}");
+            errorResponse(ctx, 409, "실행 중이 아닙니다.");
             return;
         }
         this.ctx.getProcessManager().stop(inst);
-        ctx.json("{\"result\":\"stop 요청 완료\"}");
+        resultResponse(ctx, "stop 요청 완료");
     }
 
     /** 서비스를 재시작한다. */
@@ -165,7 +194,7 @@ public class EmbeddedApiServer {
         ServiceInstance inst = findInst(ctx);
         if (inst == null) return;
         this.ctx.getProcessManager().restart(inst);
-        ctx.json("{\"result\":\"restart 요청 완료\"}");
+        resultResponse(ctx, "restart 요청 완료");
     }
 
     /** 앱 환경 설정을 반환한다. */
@@ -181,6 +210,9 @@ public class EmbeddedApiServer {
         node.put("installBase",    s.getInstallBase());
         node.put("apiServerEnabled", s.isApiServerEnabled());
         node.put("apiServerPort",  s.getApiServerPort());
+        node.put("apiServerHost",  s.getApiServerHost());
+        node.put("apiServerAllowUnauthenticatedControl",
+                s.isApiServerAllowUnauthenticatedControl());
         jsonResponse(ctx, node);
     }
 
@@ -257,7 +289,15 @@ public class EmbeddedApiServer {
     private void jsonResponse(Context ctx, ObjectNode node) {
         ctx.contentType("application/json");
         try { ctx.result(mapper.writeValueAsString(node)); }
-        catch (Exception e) { ctx.status(500).result("{\"error\":\"직렬화 오류\"}"); }
+        catch (Exception e) { errorResponse(ctx, 500, "직렬화 오류"); }
+    }
+
+    private void resultResponse(Context ctx, String message) {
+        ctx.json(Map.of("result", message));
+    }
+
+    private void errorResponse(Context ctx, int status, String message) {
+        ctx.status(status).json(Map.of("error", message));
     }
 
     private ServiceDefinition findDef(String id) {
@@ -268,7 +308,7 @@ public class EmbeddedApiServer {
     private ServiceInstance findInst(Context ctx) {
         ServiceDefinition def = findDef(ctx.pathParam("id"));
         if (def == null) {
-            ctx.status(404).json("{\"error\":\"서비스를 찾을 수 없습니다.\"}");
+            errorResponse(ctx, 404, "서비스를 찾을 수 없습니다.");
             return null;
         }
         return this.ctx.getProcessManager().getOrCreate(def);
@@ -280,6 +320,44 @@ public class EmbeddedApiServer {
     }
 
     private String nvl(String s) { return s == null ? "" : s; }
+
+    private void requireControlAuth(Context requestCtx) {
+        AppSettings settings = ctx.getAppSettingsRepository().get();
+        if (settings.isApiServerAllowUnauthenticatedControl()) {
+            return;
+        }
+
+        String expected = settings.getApiServerToken();
+        if (expected == null || expected.isBlank()) {
+            throw new UnauthorizedResponse("API 제어 토큰이 설정되지 않았습니다.");
+        }
+
+        String actual = requestCtx.header("X-LLM-Manager-Token");
+        String authorization = requestCtx.header("Authorization");
+        if ((actual == null || actual.isBlank()) && authorization != null) {
+            String prefix = "Bearer ";
+            if (authorization.regionMatches(true, 0, prefix, 0, prefix.length())) {
+                actual = authorization.substring(prefix.length());
+            }
+        }
+
+        if (!constantTimeEquals(expected.trim(), actual == null ? "" : actual.trim())) {
+            throw new UnauthorizedResponse("유효한 API 제어 토큰이 필요합니다.");
+        }
+    }
+
+    private boolean constantTimeEquals(String expected, String actual) {
+        return MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8),
+                actual.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String normalizeHost(String host) {
+        if (host == null || host.isBlank()) {
+            return "127.0.0.1";
+        }
+        return host.trim();
+    }
 
     // =========================================================
     // Swagger UI HTML
@@ -410,8 +488,12 @@ public class EmbeddedApiServer {
         ObjectNode post = path.putObject("post");
         post.put("summary", summary);
         post.putArray("tags").add("services");
+        if (!ctx.getAppSettingsRepository().get().isApiServerAllowUnauthenticatedControl()) {
+            post.putArray("security").addObject().putArray("ApiTokenAuth");
+        }
         ObjectNode responses = post.putObject("responses");
         responses.putObject("200").put("description", "요청 완료");
+        responses.putObject("401").put("description", "인증 실패");
         responses.putObject("404").put("description", "서비스 없음");
         responses.putObject("409").put("description", "이미 해당 상태");
     }
@@ -425,7 +507,14 @@ public class EmbeddedApiServer {
     }
 
     private void addComponents(ObjectNode spec) {
-        ObjectNode schemas = spec.putObject("components").putObject("schemas");
+        ObjectNode components = spec.putObject("components");
+        ObjectNode securitySchemes = components.putObject("securitySchemes");
+        ObjectNode tokenAuth = securitySchemes.putObject("ApiTokenAuth");
+        tokenAuth.put("type", "apiKey");
+        tokenAuth.put("in", "header");
+        tokenAuth.put("name", "X-LLM-Manager-Token");
+
+        ObjectNode schemas = components.putObject("schemas");
 
         // StatusResponse
         ObjectNode statusResp = schemas.putObject("StatusResponse");

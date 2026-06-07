@@ -4,10 +4,12 @@
  */
 package org.kyj.llmmanager.util;
 
+import org.apache.commons.exec.CommandLine;
 import org.kyj.llmmanager.model.ArgSpec;
 import org.kyj.llmmanager.model.ServiceDefinition;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -39,10 +41,10 @@ public class CommandBuilder {
                 }
             } else if (spec.getFlag().endsWith("=")) {
                 // Spring Boot / JVM 스타일: --key=value (플래그 끝이 = 이면 값을 바로 붙임)
-                sb.append(" ").append(spec.getFlag()).append(value);
+                sb.append(" ").append(spec.getFlag()).append(quoteIfNeeded(value));
             } else {
                 // 표준 CLI 스타일: --flag value
-                sb.append(" ").append(spec.getFlag()).append(" ").append(value);
+                sb.append(" ").append(spec.getFlag()).append(" ").append(quoteIfNeeded(value));
             }
         }
         return sb.toString();
@@ -56,31 +58,40 @@ public class CommandBuilder {
      * @return 토큰 리스트
      */
     public static List<String> splitCommand(String command) {
-        List<String> parts = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inQuote = false;
-        char quoteChar = 0;
-
-        for (char c : command.toCharArray()) {
-            if (inQuote) {
-                if (c == quoteChar) {
-                    inQuote = false;
-                } else {
-                    current.append(c);
-                }
-            } else if (c == '"' || c == '\'') {
-                inQuote = true;
-                quoteChar = c;
-            } else if (c == ' ') {
-                if (current.length() > 0) {
-                    parts.add(current.toString());
-                    current.setLength(0);
-                }
-            } else {
-                current.append(c);
-            }
+        if (command == null || command.isBlank()) {
+            return List.of();
         }
-        if (current.length() > 0) parts.add(current.toString());
+        CommandLine parsed = CommandLine.parse(command);
+        List<String> parts = new ArrayList<>();
+        parts.add(unquote(parsed.getExecutable()));
+        Arrays.stream(parsed.getArguments()).map(CommandBuilder::unquote).forEach(parts::add);
         return parts;
+    }
+
+    private static String unquote(String value) {
+        if (value == null || value.length() < 2) {
+            return value;
+        }
+        char first = value.charAt(0);
+        char last = value.charAt(value.length() - 1);
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+            return value.substring(1, value.length() - 1)
+                    .replace("\\\"", "\"")
+                    .replace("\\'", "'");
+        }
+        return value;
+    }
+
+    private static String quoteIfNeeded(String value) {
+        if (value == null || value.isEmpty()) {
+            return "\"\"";
+        }
+        boolean needsQuote = value.chars().anyMatch(Character::isWhitespace)
+                || value.contains("\"")
+                || value.contains("'");
+        if (!needsQuote) {
+            return value;
+        }
+        return "\"" + value.replace("\"", "\\\"") + "\"";
     }
 }

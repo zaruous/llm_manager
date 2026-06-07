@@ -4,6 +4,7 @@
  */
 package org.kyj.llmmanager;
 
+import org.kyj.llmmanager.util.CommandBuilder;
 import org.kyj.llmmanager.util.PlatformUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
+import java.util.List;
 
 /**
  * OS 시작 시 자동 실행 등록/해제.
@@ -160,11 +162,10 @@ public class StartupManager {
     private static boolean registerMac(String launchCommand) throws IOException, InterruptedException {
         Path file = macPlistFile();
         Files.createDirectories(file.getParent());
-        // Split command into args for plist array
-        String[] parts = launchCommand.split("\\s+");
+        List<String> parts = CommandBuilder.splitCommand(launchCommand);
         StringBuilder args = new StringBuilder();
         for (String p : parts) {
-            args.append("        <string>").append(p).append("</string>\n");
+            args.append("        <string>").append(xmlEscape(p)).append("</string>\n");
         }
         String plist = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                 + "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\""
@@ -180,6 +181,14 @@ public class StartupManager {
         new ProcessBuilder("launchctl", "load", file.toString()).start().waitFor();
         log.info("macOS LaunchAgent registered: {}", file);
         return true;
+    }
+
+    private static String xmlEscape(String value) {
+        return value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
 
     private static boolean unregisterMac() throws IOException, InterruptedException {

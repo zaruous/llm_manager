@@ -101,6 +101,11 @@ public final class AppConfigLoader {
         if (cfg.api != null && cfg.api.server != null) {
             s.setApiServerEnabled(cfg.api.server.enabled);
             s.setApiServerPort(cfg.api.server.port);
+            if (cfg.api.server.host != null) s.setApiServerHost(cfg.api.server.host);
+            if (cfg.api.server.token != null) s.setApiServerToken(cfg.api.server.token);
+            if (cfg.api.server.allowUnauthenticatedControl != null) {
+                s.setApiServerAllowUnauthenticatedControl(cfg.api.server.allowUnauthenticatedControl);
+            }
         }
         if (cfg.runtime != null) {
             if (cfg.runtime.python     != null) s.setPythonCommand(cfg.runtime.python);
@@ -118,6 +123,20 @@ public final class AppConfigLoader {
         if (cfg.monitor != null && cfg.monitor.healthCheckInterval != null) {
             s.setHealthCheckInterval(cfg.monitor.healthCheckInterval);
         }
+        if (cfg.skillLibrary != null && cfg.skillLibrary.db != null) {
+            YamlConfig.SkillLibrarySection.DbSection db = cfg.skillLibrary.db;
+            if (db.provider != null) s.setSkillLibraryDbProvider(db.provider);
+            if (db.url != null) s.setSkillLibraryDbUrl(db.url);
+            if (db.driverClass != null) s.setSkillLibraryDbDriverClass(db.driverClass);
+            if (db.schema != null) s.setSkillLibraryDbSchema(db.schema);
+            if (db.username != null) s.setSkillLibraryDbUsername(db.username);
+            if (db.password != null) s.setSkillLibraryDbPassword(db.password);
+            if (db.maximumPoolSize != null) s.setSkillLibraryDbMaximumPoolSize(db.maximumPoolSize);
+            if (db.minimumIdle != null) s.setSkillLibraryDbMinimumIdle(db.minimumIdle);
+            if (db.connectionTimeoutMs != null) s.setSkillLibraryDbConnectionTimeoutMs(db.connectionTimeoutMs);
+            if (db.idleTimeoutMs != null) s.setSkillLibraryDbIdleTimeoutMs(db.idleTimeoutMs);
+            if (db.maxLifetimeMs != null) s.setSkillLibraryDbMaxLifetimeMs(db.maxLifetimeMs);
+        }
     }
 
     // =========================================================
@@ -133,6 +152,10 @@ public final class AppConfigLoader {
     public static void applyCli(AppSettings s) {
         getCli("api.server.enabled").ifPresent(v -> s.setApiServerEnabled(Boolean.parseBoolean(v)));
         getCli("api.server.port")   .ifPresent(v -> s.setApiServerPort(parseInt(v, s.getApiServerPort())));
+        getCli("api.server.host")   .ifPresent(s::setApiServerHost);
+        getCli("api.server.token")  .ifPresent(s::setApiServerToken);
+        getCli("api.server.allow-unauthenticated-control")
+                .ifPresent(v -> s.setApiServerAllowUnauthenticatedControl(Boolean.parseBoolean(v)));
         getCli("runtime.python")    .ifPresent(s::setPythonCommand);
         getCli("runtime.python-home").ifPresent(s::setPythonHome);
         getCli("runtime.node")      .ifPresent(s::setNodeCommand);
@@ -142,6 +165,22 @@ public final class AppConfigLoader {
         getCli("install.base")               .ifPresent(s::setInstallBase);
         getCli("monitor.health-check-interval")
                 .ifPresent(v -> s.setHealthCheckInterval(parseInt(v, s.getHealthCheckInterval())));
+        getCli("skill-library.db.provider").ifPresent(s::setSkillLibraryDbProvider);
+        getCli("skill-library.db.url").ifPresent(s::setSkillLibraryDbUrl);
+        getCli("skill-library.db.driver-class").ifPresent(s::setSkillLibraryDbDriverClass);
+        getCli("skill-library.db.schema").ifPresent(s::setSkillLibraryDbSchema);
+        getCli("skill-library.db.username").ifPresent(s::setSkillLibraryDbUsername);
+        getCli("skill-library.db.password").ifPresent(s::setSkillLibraryDbPassword);
+        getCli("skill-library.db.maximum-pool-size")
+                .ifPresent(v -> s.setSkillLibraryDbMaximumPoolSize(parseInt(v, s.getSkillLibraryDbMaximumPoolSize())));
+        getCli("skill-library.db.minimum-idle")
+                .ifPresent(v -> s.setSkillLibraryDbMinimumIdle(parseInt(v, s.getSkillLibraryDbMinimumIdle())));
+        getCli("skill-library.db.connection-timeout-ms")
+                .ifPresent(v -> s.setSkillLibraryDbConnectionTimeoutMs(parseLong(v, s.getSkillLibraryDbConnectionTimeoutMs())));
+        getCli("skill-library.db.idle-timeout-ms")
+                .ifPresent(v -> s.setSkillLibraryDbIdleTimeoutMs(parseLong(v, s.getSkillLibraryDbIdleTimeoutMs())));
+        getCli("skill-library.db.max-lifetime-ms")
+                .ifPresent(v -> s.setSkillLibraryDbMaxLifetimeMs(parseLong(v, s.getSkillLibraryDbMaxLifetimeMs())));
     }
 
     private static Optional<String> getCli(String key) {
@@ -150,6 +189,11 @@ public final class AppConfigLoader {
 
     private static int parseInt(String s, int defaultVal) {
         try { return Integer.parseInt(s.trim()); }
+        catch (NumberFormatException e) { return defaultVal; }
+    }
+
+    private static long parseLong(String s, long defaultVal) {
+        try { return Long.parseLong(s.trim()); }
         catch (NumberFormatException e) { return defaultVal; }
     }
 
@@ -168,6 +212,7 @@ public final class AppConfigLoader {
         public RuntimeSection runtime;
         public InstallSection install;
         public MonitorSection monitor;
+        @JsonProperty("skill-library") public SkillLibrarySection skillLibrary;
 
         @JsonIgnoreProperties(ignoreUnknown = true)
         static class ApiSection {
@@ -176,6 +221,9 @@ public final class AppConfigLoader {
             static class ServerSection {
                 public Boolean enabled;
                 public Integer port;
+                public String host;
+                public String token;
+                @JsonProperty("allow-unauthenticated-control") public Boolean allowUnauthenticatedControl;
             }
         }
 
@@ -197,6 +245,26 @@ public final class AppConfigLoader {
         @JsonIgnoreProperties(ignoreUnknown = true)
         static class MonitorSection {
             @JsonProperty("health-check-interval") public Integer healthCheckInterval;
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        static class SkillLibrarySection {
+            public DbSection db;
+
+            @JsonIgnoreProperties(ignoreUnknown = true)
+            static class DbSection {
+                public String provider;
+                public String url;
+                @JsonProperty("driver-class") public String driverClass;
+                public String schema;
+                public String username;
+                public String password;
+                @JsonProperty("maximum-pool-size") public Integer maximumPoolSize;
+                @JsonProperty("minimum-idle") public Integer minimumIdle;
+                @JsonProperty("connection-timeout-ms") public Long connectionTimeoutMs;
+                @JsonProperty("idle-timeout-ms") public Long idleTimeoutMs;
+                @JsonProperty("max-lifetime-ms") public Long maxLifetimeMs;
+            }
         }
     }
 }

@@ -10,7 +10,11 @@ import org.kyj.llmmanager.model.AppSettings;
 import org.kyj.llmmanager.model.LlmTool;
 import org.kyj.llmmanager.model.SkillFile;
 import org.kyj.llmmanager.model.SkillPack;
+import org.kyj.llmmanager.util.PlatformUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -19,15 +23,19 @@ import java.sql.*;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 사용자가 로드한 LLM 스킬·룰 파일을 설정된 DB provider에 저장한다.
+ * HikariCP 커넥션 풀을 소유하므로 사용 후 반드시 {@link #close()}를 호출해야 한다.
  */
-public class LlmSkillLibraryRepository {
+public class LlmSkillLibraryRepository implements Closeable {
+
+    private static final Logger log = LoggerFactory.getLogger(LlmSkillLibraryRepository.class);
+
     private static final String DB_FILE_NAME = "skill-library.sqlite";
-    private static final String TABLE_NAME = "skill_files";
-    private static final String TOOL_ID = "cursor-library";
-    private static final String PACK_ID = "cursor-library-loaded";
+    private static final String TOOL_ID = "loaded-skill-library";
+    private static final String PACK_ID = "loaded-skill-library-files";
     private static final String IDENTIFIER_PATTERN = "[A-Za-z_][A-Za-z0-9_]*";
 
     private final AppSettings settings;
@@ -35,6 +43,9 @@ public class LlmSkillLibraryRepository {
     private final String jdbcUrl;
     private final String schema;
     private final HikariDataSource dataSource;
+
+    /** ensureSchema()의 중복 실행을 막는 플래그. 최초 1회 성공 후 true로 설정된다. */
+    private final AtomicBoolean schemaReady = new AtomicBoolean(false);
 
     public LlmSkillLibraryRepository(AppSettings settings) {
         this.settings = settings;
@@ -56,53 +67,51 @@ public class LlmSkillLibraryRepository {
         return schema;
     }
 
+    /**
+     * 파일 목록을 DB에 upsert한다. 실패 시 트랜잭션을 롤백하고 예외를 전파한다.
+     *
+     * @param sourceRoot    스캔한 소스 루트 디렉토리
+     * @param relativePaths sourceRoot 기준 상대 경로 목록
+     * @return 실제로 저장(insert/update)된 행 수
+     */
     public int saveFiles(Path sourceRoot, List<String> relativePaths) throws IOException, SQLException {
-        prepareLocalSqliteDirectory();
         ensureSchema();
 
         int saved = 0;
-        try (Connection con = connect();
-             PreparedStatement update = con.prepareStatement("""
-                     UPDATE skill_files
-                     SET source_root = ?, target_path = ?, content = ?, updated_at = ?
-                     WHERE relative_path = ?
-                     """);
-             PreparedStatement insert = con.prepareStatement("""
-                     INSERT INTO skill_files
-                         (source_root, relative_path, target_path, content, updated_at)
-                     VALUES (?, ?, ?, ?, ?)
-                     """)) {
+        try (Connection con = connect()) {
             con.setAutoCommit(false);
-            for (String relativePath : relativePaths) {
-                String normalized = normalize(relativePath);
-                String content = Files.readString(sourceRoot.resolve(relativePath), StandardCharsets.UTF_8);
-                String targetPath = toInstallTargetPath(normalized);
-                String updatedAt = Instant.now().toString();
+            try {
+                String upsertSql = buildUpsertSql();
+                try (PreparedStatement ps = con.prepareStatement(upsertSql)) {
+                    for (String relativePath : relativePaths) {
+                        String normalized = normalize(relativePath);
+                        String content = Files.readString(sourceRoot.resolve(relativePath), StandardCharsets.UTF_8);
+                        String targetPath = toInstallTargetPath(normalized);
+                        String updatedAt = Instant.now().toString();
 
-                update.setString(1, sourceRoot.toAbsolutePath().normalize().toString());
-                update.setString(2, targetPath);
-                update.setString(3, content);
-                update.setString(4, updatedAt);
-                update.setString(5, normalized);
-
-                if (update.executeUpdate() == 0) {
-                    insert.setString(1, sourceRoot.toAbsolutePath().normalize().toString());
-                    insert.setString(2, normalized);
-                    insert.setString(3, targetPath);
-                    insert.setString(4, content);
-                    insert.setString(5, updatedAt);
-                    insert.executeUpdate();
+                        ps.setString(1, sourceRoot.toAbsolutePath().normalize().toString());
+                        ps.setString(2, normalized);
+                        ps.setString(3, targetPath);
+                        ps.setString(4, content);
+                        ps.setString(5, updatedAt);
+                        saved += ps.executeUpdate();
+                    }
                 }
-                saved++;
+                con.commit();
+            } catch (Exception e) {
+                con.rollback();
+                throw e;
             }
-            con.commit();
         }
         return saved;
     }
 
+    /**
+     * DB에 저장된 스킬 파일을 LlmTool 목록으로 반환한다.
+     * DB가 비어 있으면 빈 목록을, 오류 시에는 로그를 남기고 빈 목록을 반환한다.
+     */
     public List<LlmTool> loadTools() {
         try {
-            prepareLocalSqliteDirectory();
             ensureSchema();
             List<SkillFile> files = new ArrayList<>();
             try (Connection con = connect();
@@ -138,10 +147,18 @@ public class LlmSkillLibraryRepository {
             tool.setPacks(List.of(pack));
             return List.of(tool);
         } catch (Exception e) {
+            log.warn("스킬 라이브러리 loadTools 실패 (provider={}): {}", provider, e.getMessage(), e);
             return List.of();
         }
     }
 
+    /**
+     * DB에서 파일 내용을 읽어 반환한다.
+     *
+     * @param id skill_files.id
+     * @return 파일 텍스트 내용
+     * @throws IOException DB 오류 또는 해당 id가 없을 때
+     */
     public String readContent(long id) throws IOException {
         try {
             ensureSchema();
@@ -168,41 +185,76 @@ public class LlmSkillLibraryRepository {
         // 현재 구현은 조회 시마다 DB를 직접 읽으므로 명시 캐시가 없다.
     }
 
-    private void ensureSchema() throws SQLException, IOException {
-        prepareLocalSqliteDirectory();
-        try (Connection con = connect()) {
-            if (tableExists(con)) {
-                return;
-            }
-            try (Statement st = con.createStatement()) {
-                st.executeUpdate(createTableSql());
-                try {
-                    st.executeUpdate("CREATE INDEX idx_skill_files_target_path ON skill_files(target_path)");
-                } catch (SQLException ignored) {
-                    // 일부 DB는 인덱스명 충돌이나 권한 문제로 실패할 수 있다. 테이블만 있으면 기능은 동작한다.
-                }
-            }
-        }
+    @Override
+    public void close() {
+        dataSource.close();
     }
 
-    private boolean tableExists(Connection con) throws SQLException {
-        DatabaseMetaData meta = con.getMetaData();
-        String[] names = { TABLE_NAME, TABLE_NAME.toUpperCase(), TABLE_NAME.toLowerCase() };
-        String schemaPattern = schema.isBlank() ? null : schema;
-        for (String name : names) {
-            try (ResultSet rs = meta.getTables(null, schemaPattern, name, new String[] { "TABLE" })) {
-                if (rs.next()) {
-                    return true;
-                }
+    // =========================================================
+    // 내부 구현
+    // =========================================================
+
+    /**
+     * 테이블이 없으면 생성한다. schemaReady 플래그로 인스턴스 생존 기간 동안 한 번만 실행된다.
+     * CREATE TABLE IF NOT EXISTS를 사용하므로 동시 호출 시에도 안전하다.
+     */
+    private synchronized void ensureSchema() throws SQLException, IOException {
+        if (schemaReady.get()) {
+            return;
+        }
+        prepareLocalSqliteDirectory();
+        try (Connection con = connect();
+             Statement st = con.createStatement()) {
+            st.executeUpdate(createTableSql());
+            try {
+                st.executeUpdate("CREATE INDEX IF NOT EXISTS idx_skill_files_target_path ON skill_files(target_path)");
+            } catch (SQLException ignored) {
+                // 인덱스 생성 실패는 기능에 영향 없다.
             }
         }
-        return false;
+        schemaReady.set(true);
+    }
+
+    /**
+     * provider별 원자적 upsert SQL을 반환한다.
+     * SQLite: INSERT OR REPLACE, PostgreSQL: ON CONFLICT DO UPDATE, 그 외: MERGE / INSERT OR REPLACE 사용.
+     */
+    private String buildUpsertSql() {
+        return switch (provider) {
+            case "postgresql" -> """
+                    INSERT INTO skill_files
+                        (source_root, relative_path, target_path, content, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (relative_path) DO UPDATE SET
+                        source_root = EXCLUDED.source_root,
+                        target_path = EXCLUDED.target_path,
+                        content     = EXCLUDED.content,
+                        updated_at  = EXCLUDED.updated_at
+                    """;
+            case "mssql" -> """
+                    MERGE INTO skill_files AS t
+                    USING (VALUES (?, ?, ?, ?, ?)) AS s(source_root, relative_path, target_path, content, updated_at)
+                    ON t.relative_path = s.relative_path
+                    WHEN MATCHED THEN
+                        UPDATE SET source_root = s.source_root, target_path = s.target_path,
+                                   content = s.content, updated_at = s.updated_at
+                    WHEN NOT MATCHED THEN
+                        INSERT (source_root, relative_path, target_path, content, updated_at)
+                        VALUES (s.source_root, s.relative_path, s.target_path, s.content, s.updated_at);
+                    """;
+            // SQLite default: INSERT OR REPLACE (atomic; Oracle도 MERGE 없이 동일 패턴 지원)
+            default -> """
+                    INSERT OR REPLACE INTO skill_files
+                        (source_root, relative_path, target_path, content, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """;
+        };
     }
 
     private String createTableSql() {
         return switch (provider) {
             case "postgresql" -> """
-                    CREATE TABLE skill_files (
+                    CREATE TABLE IF NOT EXISTS skill_files (
                         id BIGSERIAL PRIMARY KEY,
                         source_root TEXT NOT NULL,
                         relative_path TEXT NOT NULL UNIQUE,
@@ -212,16 +264,25 @@ public class LlmSkillLibraryRepository {
                     )
                     """;
             case "oracle" -> """
-                    CREATE TABLE skill_files (
-                        id NUMBER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                        source_root VARCHAR2(2000) NOT NULL,
-                        relative_path VARCHAR2(1000) NOT NULL UNIQUE,
-                        target_path VARCHAR2(1000) NOT NULL,
-                        content CLOB NOT NULL,
-                        updated_at VARCHAR2(64) NOT NULL
-                    )
+                    DECLARE
+                        v_cnt NUMBER;
+                    BEGIN
+                        SELECT COUNT(*) INTO v_cnt FROM user_tables WHERE table_name = 'SKILL_FILES';
+                        IF v_cnt = 0 THEN
+                            EXECUTE IMMEDIATE '
+                                CREATE TABLE skill_files (
+                                    id NUMBER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                                    source_root VARCHAR2(2000) NOT NULL,
+                                    relative_path VARCHAR2(1000) NOT NULL UNIQUE,
+                                    target_path VARCHAR2(1000) NOT NULL,
+                                    content CLOB NOT NULL,
+                                    updated_at VARCHAR2(64) NOT NULL
+                                )';
+                        END IF;
+                    END;
                     """;
             case "mssql" -> """
+                    IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'skill_files')
                     CREATE TABLE skill_files (
                         id BIGINT IDENTITY(1,1) PRIMARY KEY,
                         source_root NVARCHAR(2000) NOT NULL,
@@ -232,7 +293,7 @@ public class LlmSkillLibraryRepository {
                     )
                     """;
             default -> """
-                    CREATE TABLE skill_files (
+                    CREATE TABLE IF NOT EXISTS skill_files (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         source_root TEXT NOT NULL,
                         relative_path TEXT NOT NULL UNIQUE,
@@ -272,10 +333,6 @@ public class LlmSkillLibraryRepository {
         return new HikariDataSource(config);
     }
 
-    public void close() {
-        dataSource.close();
-    }
-
     private String resolveDriverClass() {
         String driverClass = settings.getSkillLibraryDbDriverClass();
         if (driverClass == null || driverClass.isBlank()) {
@@ -284,11 +341,17 @@ public class LlmSkillLibraryRepository {
         return driverClass;
     }
 
+    /** SQLite 파일 DB 사용 시 부모 디렉토리를 미리 생성한다. :memory: URL은 건너뛴다. */
     private void prepareLocalSqliteDirectory() throws IOException {
         if (!"sqlite".equals(provider) || !jdbcUrl.startsWith("jdbc:sqlite:")) {
             return;
         }
-        Path path = Path.of(jdbcUrl.substring("jdbc:sqlite:".length())).toAbsolutePath().normalize();
+        String filePart = jdbcUrl.substring("jdbc:sqlite:".length());
+        // 인메모리 URL은 파일시스템 접근이 불필요하다.
+        if (filePart.startsWith(":") || filePart.startsWith("file:") && filePart.contains(":memory:")) {
+            return;
+        }
+        Path path = Path.of(filePart).toAbsolutePath().normalize();
         if (path.getParent() != null) {
             Files.createDirectories(path.getParent());
         }
@@ -317,16 +380,15 @@ public class LlmSkillLibraryRepository {
             return configured;
         }
         if ("sqlite".equals(provider)) {
-            return "jdbc:sqlite:" + resolveDefaultProjectRoot()
-                    .resolve("lib").resolve("cursor").resolve(DB_FILE_NAME)
+            // 런타임 데이터는 모두 PlatformUtil.getAppHome() 아래에 저장한다.
+            return "jdbc:sqlite:" + PlatformUtil.getAppHome().resolve(DB_FILE_NAME)
                     .toAbsolutePath().normalize();
         }
         return switch (provider) {
             case "postgresql" -> "jdbc:postgresql://localhost:5432/llm_manager";
             case "oracle" -> "jdbc:oracle:thin:@localhost:1521/FREEPDB1";
             case "mssql" -> "jdbc:sqlserver://localhost:1433;databaseName=llm_manager;encrypt=true;trustServerCertificate=true";
-            default -> "jdbc:sqlite:" + resolveDefaultProjectRoot()
-                    .resolve("lib").resolve("cursor").resolve(DB_FILE_NAME)
+            default -> "jdbc:sqlite:" + PlatformUtil.getAppHome().resolve(DB_FILE_NAME)
                     .toAbsolutePath().normalize();
         };
     }
@@ -361,19 +423,5 @@ public class LlmSkillLibraryRepository {
             return "." + path;
         }
         return path;
-    }
-
-    private static Path resolveDefaultProjectRoot() {
-        Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
-        Path cursor = current;
-        while (cursor != null) {
-            if (Files.exists(cursor.resolve("build.gradle")) ||
-                Files.exists(cursor.resolve("settings.gradle")) ||
-                Files.exists(cursor.resolve(".git"))) {
-                return cursor;
-            }
-            cursor = cursor.getParent();
-        }
-        return current;
     }
 }

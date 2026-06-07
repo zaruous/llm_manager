@@ -10,6 +10,7 @@ import org.kyj.llmmanager.service.InstallationService;
 import org.kyj.llmmanager.service.SystemMonitorService;
 import org.kyj.llmmanager.ui.cell.ServiceListCell;
 import org.kyj.llmmanager.ui.dialog.ServiceDetailDialog;
+import org.kyj.llmmanager.util.CommandBuilder;
 import org.kyj.llmmanager.util.SceneFactory;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -35,6 +36,7 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.beans.value.ChangeListener;
 
 import java.io.File;
 import java.net.URL;
@@ -97,6 +99,8 @@ public class MainController implements Initializable {
     @FXML private CheckBox autoScrollCheck;
     /** 로그 탭: 로그 필터 입력 필드 */
     @FXML private TextField filterField;
+    /** 로그 탭: 프로세스 stdout/stderr 디코딩 인코딩 선택 */
+    @FXML private ComboBox<String> logEncodingCombo;
 
     // ---- Config tab ----
     /** 설정 탭: 실행 인수 입력 영역 */
@@ -166,15 +170,25 @@ public class MainController implements Initializable {
      * 선택 변경 시 이전 리스너를 반드시 해제한다.
      */
     private ListChangeListener<LogEntry> logListener;
+    /** 선택 서비스 상태 변경 리스너. 선택 변경 시 이전 리스너를 해제한다. */
+    private ChangeListener<ServiceStatus> selectedStatusListener;
+    /** 대시보드 카드 재빌드 시 이전 카드 리스너를 해제하기 위한 cleanup 목록. */
+    private final List<Runnable> dashboardListenerCleanups = new ArrayList<>();
     /** 설정 탭의 인수 이름 → 입력 컨트롤 맵 */
     private final Map<String, Control> argControls = new HashMap<>();
     /** 1초 간격으로 업타임 레이블을 갱신하는 스케줄러 */
     private ScheduledExecutorService uptimeScheduler;
     /** 로그 탭 TextArea에 현재 표시 중인 행 수. 5000행 초과 시 앞 1000행을 제거한다. */
     private int logLineCount = 0;
+    /** 서비스 선택 시 콤보 값을 맞추는 동안 저장 이벤트를 막는다. */
+    private boolean updatingLogEncoding = false;
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
+        logEncodingCombo.setItems(FXCollections.observableArrayList(
+                "시스템 기본값", "UTF-8", "MS949", "EUC-KR", "ISO-8859-1"));
+        logEncodingCombo.setValue("시스템 기본값");
+
         serviceListView.setItems(instanceList);
         serviceListView.setCellFactory(lv -> new ServiceListCell());
 
@@ -279,22 +293,35 @@ public class MainController implements Initializable {
      * @param instance 새로 선택된 ServiceInstance
      */
     private void onServiceSelected(ServiceInstance instance) {
-        if (instance == null) return;
-
-        // Detach old listener
-        if (selectedInstance != null && logListener != null) {
-            selectedInstance.getLogs().removeListener(logListener);
+        detachSelectedServiceListeners();
+        if (instance == null) {
+            selectedInstance = null;
+            return;
         }
 
         selectedInstance = instance;
         showDetail();  // 서비스 선택 시 상세 뷰로 전환
 
         // Status listener
-        instance.statusProperty().addListener((obs, old, newVal) -> refreshDetail());
+        selectedStatusListener = (obs, old, newVal) -> refreshDetail();
+        instance.statusProperty().addListener(selectedStatusListener);
         refreshDetail();
         refreshLogs();
+        refreshLogEncoding();
         refreshConfig();
         refreshInstall();
+    }
+
+    /** 선택 서비스에 붙어 있던 상세 화면 리스너를 해제한다. */
+    private void detachSelectedServiceListeners() {
+        if (selectedInstance != null && logListener != null) {
+            selectedInstance.getLogs().removeListener(logListener);
+            logListener = null;
+        }
+        if (selectedInstance != null && selectedStatusListener != null) {
+            selectedInstance.statusProperty().removeListener(selectedStatusListener);
+            selectedStatusListener = null;
+        }
     }
 
     /**
@@ -371,6 +398,18 @@ public class MainController implements Initializable {
         selectedInstance.getLogs().addListener(logListener);
     }
 
+    private void refreshLogEncoding() {
+        if (selectedInstance == null) return;
+        String charset = selectedInstance.getDefinition().getLogCharset();
+        updatingLogEncoding = true;
+        try {
+            logEncodingCombo.setValue(charset == null || charset.isBlank()
+                    ? "시스템 기본값" : charset);
+        } finally {
+            updatingLogEncoding = false;
+        }
+    }
+
     private void appendLogEntry(LogEntry entry) {
         String filter = filterField.getText();
         if (filter != null && !filter.isBlank()
@@ -407,6 +446,21 @@ public class MainController implements Initializable {
         if (selectedInstance == null) return;
         logArea.clear();
         selectedInstance.getLogs().forEach(this::appendLogEntry);
+    }
+
+    @FXML
+    private void onLogEncodingChanged() {
+        if (updatingLogEncoding || selectedInstance == null || ctx == null) return;
+        String selected = logEncodingCombo.getValue();
+        String charset = "시스템 기본값".equals(selected) ? "" : selected;
+        ServiceDefinition def = selectedInstance.getDefinition();
+        def.setLogCharset(charset);
+        ctx.getServiceRegistry().update(def);
+        if (selectedInstance.getStatus() == ServiceStatus.RUNNING) {
+            ctx.getLogService().addSystemLog(selectedInstance,
+                    "로그 인코딩 변경은 다음 시작부터 적용됩니다: "
+                            + (charset.isBlank() ? "시스템 기본값" : charset));
+        }
     }
 
     // =========================================================
@@ -727,10 +781,10 @@ public class MainController implements Initializable {
         String cmd = def.getStartCommand();
         if (cmd == null || cmd.isBlank()) return null;
 
-        String[] tokens = cmd.trim().split("\\s+");
-        for (int i = 0; i < tokens.length - 1; i++) {
-            if ("-jar".equalsIgnoreCase(tokens[i])) {
-                String jarName = tokens[i + 1];
+        List<String> tokens = CommandBuilder.splitCommand(cmd);
+        for (int i = 0; i < tokens.size() - 1; i++) {
+            if ("-jar".equalsIgnoreCase(tokens.get(i))) {
+                String jarName = tokens.get(i + 1);
                 File bundled = Path.of("lib", jarName).toFile();
                 if (bundled.exists()) return bundled;
                 break;
@@ -900,7 +954,10 @@ public class MainController implements Initializable {
                     ButtonType.OK).showAndWait();
             return;
         }
-        String url = "http://localhost:" + apiServer.getPort() + "/swagger-ui";
+        String host = apiServer.getHost();
+        String browserHost = host == null || host.isBlank() || "0.0.0.0".equals(host.trim())
+                ? "localhost" : host.trim();
+        String url = "http://" + browserHost + ":" + apiServer.getPort() + "/swagger-ui";
         try {
             java.awt.Desktop.getDesktop().browse(java.net.URI.create(url));
         } catch (Exception e) {
@@ -960,6 +1017,7 @@ public class MainController implements Initializable {
                 ctx.getServiceRegistry().remove(def.getId());
                 ctx.getProcessManager().remove(def.getId());
                 instanceList.remove(selectedInstance);
+                detachSelectedServiceListeners();
                 selectedInstance = null;
                 updateStatusBar();
                 showDashboard();  // 삭제 후 대시보드로 복귀
@@ -1001,12 +1059,19 @@ public class MainController implements Initializable {
      * statusProperty 리스너로 상태 변경 시 카드 내 색상·버튼을 실시간 갱신한다.
      */
     private void buildDashboardCards() {
+        clearDashboardCardListeners();
         dashboardCardPane.getChildren().clear();
         List<ServiceInstance> instances = ctx.getProcessManager().getAllInstances();
         for (ServiceInstance inst : instances) {
             dashboardCardPane.getChildren().add(createServiceCard(inst));
         }
         updateDashboardSummary(instances);
+    }
+
+    /** 이전 대시보드 카드가 등록한 리스너를 해제한다. */
+    private void clearDashboardCardListeners() {
+        dashboardListenerCleanups.forEach(Runnable::run);
+        dashboardListenerCleanups.clear();
     }
 
     /**
@@ -1097,10 +1162,13 @@ public class MainController implements Initializable {
                 resetCardMem(memBar, memDetailLabel, sparkline);
             }
         };
-        inst.memoryBytesProperty().addListener((obs, o, n) -> updateMem.run());
+        ChangeListener<Number> memoryListener = (obs, o, n) -> updateMem.run();
+        inst.memoryBytesProperty().addListener(memoryListener);
+        dashboardListenerCleanups.add(() ->
+                inst.memoryBytesProperty().removeListener(memoryListener));
 
         // statusProperty 구독 → 카드 실시간 갱신
-        inst.statusProperty().addListener((obs, old, newStatus) -> {
+        ChangeListener<ServiceStatus> statusListener = (obs, old, newStatus) -> {
             applyCardDotColor(dot, newStatus);
             statusLabel.setText(newStatus.getLabel());
             actionBtn.setText(cardActionLabel(newStatus));
@@ -1110,7 +1178,10 @@ public class MainController implements Initializable {
                 resetCardMem(memBar, memDetailLabel, sparkline);
             }
             updateDashboardSummary(ctx.getProcessManager().getAllInstances());
-        });
+        };
+        inst.statusProperty().addListener(statusListener);
+        dashboardListenerCleanups.add(() ->
+                inst.statusProperty().removeListener(statusListener));
 
         // 스페이서 — 설명과 버튼 사이 여백을 채워 버튼 위치를 카드 하단에 고정
         Region spacer = new Region();
@@ -1232,7 +1303,7 @@ public class MainController implements Initializable {
         root.setPadding(new Insets(20));
         root.setStyle("-fx-background-color: #1e1e2e;");
 
-        inst.memoryBytesProperty().addListener((obs, o, n) -> {
+        ChangeListener<Number> popupMemoryListener = (obs, o, n) -> {
             if (!popup.isShowing()) return;
             long r = n.longValue();
             long v = inst.getVirtualMemoryBytes();
@@ -1242,7 +1313,9 @@ public class MainController implements Initializable {
             pctLbl.setText(v > 0 ? String.format("%.1f%% 상주 중", 100.0 * r / v) : "");
             hintLbl.setText("최근 " + inst.getMemoryHistory().size() + "회 샘플 (10초 간격)");
             drawCardSparkline(bigChart, inst.getMemoryHistory());
-        });
+        };
+        inst.memoryBytesProperty().addListener(popupMemoryListener);
+        popup.setOnHidden(e -> inst.memoryBytesProperty().removeListener(popupMemoryListener));
 
         popup.setScene(new Scene(root, 500, 380));
         popup.show();

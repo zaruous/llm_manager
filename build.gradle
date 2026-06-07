@@ -29,12 +29,25 @@ dependencies {
     implementation 'org.slf4j:slf4j-api:2.0.12'
     implementation 'ch.qos.logback:logback-classic:1.5.3'
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.16.1'
+    implementation 'com.zaxxer:HikariCP:5.1.0'
+    implementation 'org.xerial:sqlite-jdbc:3.45.2.0'
+    implementation 'org.postgresql:postgresql:42.7.10'
+    implementation 'com.microsoft.sqlserver:mssql-jdbc:13.4.0.jre11'
+    implementation 'com.oracle.database.jdbc:ojdbc11:23.26.2.0.0'
+    implementation 'org.apache.commons:commons-exec:1.6.0'
     implementation 'org.apache.groovy:groovy:4.0.21'
     implementation 'org.apache.groovy:groovy-jsr223:4.0.21'
     // 내장 REST API 서버 + Swagger UI
     implementation 'io.javalin:javalin:6.3.0'
     // 시스템 리소스 모니터링 (CPU·메모리·OS 정보)
     implementation 'com.github.oshi:oshi-core:6.6.1'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:6.0.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
 }
 
 application {

@@ -17,6 +17,15 @@ api:
     # HTTP 리슨 포트
     # CLI: --api.server.port=8185
     port: 8185
+    # HTTP 바인딩 호스트. 기본값은 로컬 접근만 허용
+    # CLI: --api.server.host=127.0.0.1
+    host: 127.0.0.1
+    # 서비스 시작/중지/재시작 API 토큰
+    # CLI: --api.server.token=...
+    token: "llm-manager-local-20260607"
+    # true이면 서비스 제어 API를 토큰 없이 허용
+    # CLI: --api.server.allow-unauthenticated-control=true
+    allow-unauthenticated-control: true
 
 # 런타임 명령어
 runtime:

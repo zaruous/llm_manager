@@ -41,8 +41,50 @@ public class AppSettings {
     /** 내장 REST API 서버 포트 (기본값: 8185) */
     private int apiServerPort = 8185;
 
+    /** 내장 REST API 서버 바인딩 호스트. 기본값은 로컬 접근만 허용한다. */
+    private String apiServerHost = "127.0.0.1";
+
+    /** 서비스 제어 API 인증 토큰. 인증 우회가 꺼져 있으면 이 값이 필요하다. */
+    private String apiServerToken = "";
+
+    /** true이면 서비스 시작/중지/재시작 API를 토큰 없이 허용한다. */
+    private boolean apiServerAllowUnauthenticatedControl = false;
+
     /** 헬스체크 및 메모리 수집 주기 (초, 1~10, 기본값: 10) */
     private int healthCheckInterval = 10;
+
+    /** 스킬 라이브러리 DB provider (sqlite, postgresql, oracle, mssql) */
+    private String skillLibraryDbProvider = "sqlite";
+
+    /** 스킬 라이브러리 JDBC URL. 비어 있으면 provider별 기본값 사용. */
+    private String skillLibraryDbUrl = "";
+
+    /** 스킬 라이브러리 JDBC 드라이버 클래스. 비어 있으면 provider별 기본값 사용. */
+    private String skillLibraryDbDriverClass = "";
+
+    /** 스킬 라이브러리 DB schema. SQLite에서는 사용하지 않는다. */
+    private String skillLibraryDbSchema = "";
+
+    /** 스킬 라이브러리 DB 사용자명. 비어 있으면 인증 정보 미설정. */
+    private String skillLibraryDbUsername = "";
+
+    /** 스킬 라이브러리 DB 비밀번호. */
+    private String skillLibraryDbPassword = "";
+
+    /** 스킬 라이브러리 DB 최대 커넥션 수. */
+    private int skillLibraryDbMaximumPoolSize = 3;
+
+    /** 스킬 라이브러리 DB 최소 idle 커넥션 수. */
+    private int skillLibraryDbMinimumIdle = 0;
+
+    /** 스킬 라이브러리 DB 커넥션 타임아웃(ms). */
+    private long skillLibraryDbConnectionTimeoutMs = 3000;
+
+    /** 스킬 라이브러리 DB idle 타임아웃(ms). */
+    private long skillLibraryDbIdleTimeoutMs = 600000;
+
+    /** 스킬 라이브러리 DB 커넥션 최대 수명(ms). */
+    private long skillLibraryDbMaxLifetimeMs = 1800000;
 
     public AppSettings() {
         // 플랫폼 기본값으로 초기화
@@ -79,6 +121,23 @@ public class AppSettings {
     public int getApiServerPort() { return apiServerPort; }
     public void setApiServerPort(int apiServerPort) { this.apiServerPort = apiServerPort; }
 
+    public String getApiServerHost() { return apiServerHost; }
+    public void setApiServerHost(String apiServerHost) {
+        this.apiServerHost = apiServerHost;
+    }
+
+    public String getApiServerToken() { return apiServerToken; }
+    public void setApiServerToken(String apiServerToken) {
+        this.apiServerToken = apiServerToken;
+    }
+
+    public boolean isApiServerAllowUnauthenticatedControl() {
+        return apiServerAllowUnauthenticatedControl;
+    }
+    public void setApiServerAllowUnauthenticatedControl(boolean apiServerAllowUnauthenticatedControl) {
+        this.apiServerAllowUnauthenticatedControl = apiServerAllowUnauthenticatedControl;
+    }
+
     /**
      * 헬스체크 주기를 반환한다. 1~10 범위를 벗어나면 기본값 10으로 클램핑.
      *
@@ -89,5 +148,60 @@ public class AppSettings {
     }
     public void setHealthCheckInterval(int healthCheckInterval) {
         this.healthCheckInterval = healthCheckInterval;
+    }
+
+    public String getSkillLibraryDbProvider() { return skillLibraryDbProvider; }
+    public void setSkillLibraryDbProvider(String skillLibraryDbProvider) {
+        this.skillLibraryDbProvider = skillLibraryDbProvider;
+    }
+
+    public String getSkillLibraryDbUrl() { return skillLibraryDbUrl; }
+    public void setSkillLibraryDbUrl(String skillLibraryDbUrl) {
+        this.skillLibraryDbUrl = skillLibraryDbUrl;
+    }
+
+    public String getSkillLibraryDbDriverClass() { return skillLibraryDbDriverClass; }
+    public void setSkillLibraryDbDriverClass(String skillLibraryDbDriverClass) {
+        this.skillLibraryDbDriverClass = skillLibraryDbDriverClass;
+    }
+
+    public String getSkillLibraryDbSchema() { return skillLibraryDbSchema; }
+    public void setSkillLibraryDbSchema(String skillLibraryDbSchema) {
+        this.skillLibraryDbSchema = skillLibraryDbSchema;
+    }
+
+    public String getSkillLibraryDbUsername() { return skillLibraryDbUsername; }
+    public void setSkillLibraryDbUsername(String skillLibraryDbUsername) {
+        this.skillLibraryDbUsername = skillLibraryDbUsername;
+    }
+
+    public String getSkillLibraryDbPassword() { return skillLibraryDbPassword; }
+    public void setSkillLibraryDbPassword(String skillLibraryDbPassword) {
+        this.skillLibraryDbPassword = skillLibraryDbPassword;
+    }
+
+    public int getSkillLibraryDbMaximumPoolSize() { return skillLibraryDbMaximumPoolSize; }
+    public void setSkillLibraryDbMaximumPoolSize(int skillLibraryDbMaximumPoolSize) {
+        this.skillLibraryDbMaximumPoolSize = skillLibraryDbMaximumPoolSize;
+    }
+
+    public int getSkillLibraryDbMinimumIdle() { return skillLibraryDbMinimumIdle; }
+    public void setSkillLibraryDbMinimumIdle(int skillLibraryDbMinimumIdle) {
+        this.skillLibraryDbMinimumIdle = skillLibraryDbMinimumIdle;
+    }
+
+    public long getSkillLibraryDbConnectionTimeoutMs() { return skillLibraryDbConnectionTimeoutMs; }
+    public void setSkillLibraryDbConnectionTimeoutMs(long skillLibraryDbConnectionTimeoutMs) {
+        this.skillLibraryDbConnectionTimeoutMs = skillLibraryDbConnectionTimeoutMs;
+    }
+
+    public long getSkillLibraryDbIdleTimeoutMs() { return skillLibraryDbIdleTimeoutMs; }
+    public void setSkillLibraryDbIdleTimeoutMs(long skillLibraryDbIdleTimeoutMs) {
+        this.skillLibraryDbIdleTimeoutMs = skillLibraryDbIdleTimeoutMs;
+    }
+
+    public long getSkillLibraryDbMaxLifetimeMs() { return skillLibraryDbMaxLifetimeMs; }
+    public void setSkillLibraryDbMaxLifetimeMs(long skillLibraryDbMaxLifetimeMs) {
+        this.skillLibraryDbMaxLifetimeMs = skillLibraryDbMaxLifetimeMs;
     }
 }
