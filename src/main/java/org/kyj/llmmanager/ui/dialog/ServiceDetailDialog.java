@@ -89,7 +89,7 @@ public class ServiceDetailDialog {
         // 서비스에 argSpecs가 없으면 builtin 정의에서 fallback으로 가져온다
         List<ArgSpec> argSpecs = def.getArgSpecs();
         if (argSpecs.isEmpty() && ctx != null) {
-            argSpecs = ctx.getBuiltinServiceLoader().loadAll().stream()
+            argSpecs = ctx.getServicePackLoader().loadAll().stream()
                     .filter(b -> b.getName().equals(def.getName()))
                     .findFirst()
                     .map(ServiceDefinition::getArgSpecs)

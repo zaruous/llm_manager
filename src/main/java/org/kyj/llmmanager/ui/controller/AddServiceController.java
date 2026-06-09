@@ -80,13 +80,13 @@ public class AddServiceController {
 
         templateCombo.getItems().add("직접 입력");
 
-        // lib/def/*.json 에서 builtin 서비스 정의를 동적으로 로드해 템플릿 목록에 추가
-        try {
-            AppContext.getInstance().getBuiltinServiceLoader().loadAll().forEach(def -> {
+        // service-packs/*.yml 에서 서비스 팩 정의를 로드해 템플릿 목록에 추가
+        packLoader.loadAll().forEach(def -> {
+            if (def.getName() != null) {
                 templateDefs.put(def.getName(), def);
                 templateCombo.getItems().add(def.getName());
-            });
-        } catch (Exception ignored) {}
+            }
+        });
 
         // 고정 제공 제네릭 템플릿
         templateCombo.getItems().addAll("MCP Server (Node.js)", "Python FastAPI Server");

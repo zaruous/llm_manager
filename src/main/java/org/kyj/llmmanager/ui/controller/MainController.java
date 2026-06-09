@@ -17,6 +17,8 @@ import javafx.animation.Timeline;
 import javafx.util.Duration;
 import org.kyj.llmmanager.ui.dialog.AddServiceDialog;
 import org.kyj.llmmanager.ui.dialog.HelpDialog;
+import org.kyj.llmmanager.ui.dialog.PluginCommandRunDialog;
+import org.kyj.llmmanager.ui.dialog.PluginManagerDialog;
 import org.kyj.llmmanager.ui.dialog.SettingsDialog;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -190,7 +192,7 @@ public class MainController implements Initializable {
         logEncodingCombo.setValue("시스템 기본값");
 
         serviceListView.setItems(instanceList);
-        serviceListView.setCellFactory(lv -> new ServiceListCell());
+        serviceListView.setCellFactory(lv -> new ServiceListCell(this::removeService));
 
         serviceListView.getSelectionModel().selectedItemProperty().addListener(
                 (obs, old, selected) -> onServiceSelected(selected));
@@ -790,7 +792,7 @@ public class MainController implements Initializable {
         for (int i = 0; i < tokens.size() - 1; i++) {
             if ("-jar".equalsIgnoreCase(tokens.get(i))) {
                 String jarName = tokens.get(i + 1);
-                // 배포 환경: 메인 JAR가 위치한 lib/ 디렉토리에서 탐색 (BuiltinServiceLoader와 동일 방식)
+                // 배포 환경: 메인 JAR가 위치한 lib/ 디렉토리에서 탐색
                 try {
                     Path codeLoc = Path.of(MainController.class
                             .getProtectionDomain().getCodeSource().getLocation().toURI());
@@ -903,7 +905,7 @@ public class MainController implements Initializable {
 
         // 기본 제공 서비스가 있으면 선택 다이얼로그 먼저 표시
         List<org.kyj.llmmanager.model.ServiceDefinition> builtins =
-                ctx.getBuiltinServiceLoader().loadAll();
+                ctx.getServicePackLoader().loadAll();
 
         ServiceDefinition prefill = null;
         if (!builtins.isEmpty()) {
@@ -946,6 +948,16 @@ public class MainController implements Initializable {
     @FXML
     private void onSettings() {
         new SettingsDialog((Stage) menuBar.getScene().getWindow()).showAndWait();
+    }
+
+    @FXML
+    private void onPlugins() {
+        new PluginManagerDialog((Stage) menuBar.getScene().getWindow()).show();
+    }
+
+    @FXML
+    private void onRunPluginCommand() {
+        new PluginCommandRunDialog((Stage) menuBar.getScene().getWindow()).show();
     }
 
     /**
@@ -1026,31 +1038,42 @@ public class MainController implements Initializable {
     }
 
     /**
-     * 확인 후 선택 서비스를 중지하고 Registry에서 제거한다.
+     * 확인 후 선택 서비스를 중지하고 Registry에서 제거한다. 메뉴/단축키 진입점.
      */
     @FXML
     private void onDeleteService() {
         if (selectedInstance == null) return;
-        ServiceDefinition def = selectedInstance.getDefinition();
+        removeService(selectedInstance);
+    }
+
+    /**
+     * 확인 다이얼로그 후 서비스를 중지·Registry 제거·UI 갱신한다.
+     * 우클릭 컨텍스트 메뉴와 메뉴바 Delete 키 양쪽에서 호출된다.
+     *
+     * @param inst 제거할 서비스 인스턴스
+     */
+    private void removeService(ServiceInstance inst) {
+        if (inst == null) return;
+        ServiceDefinition def = inst.getDefinition();
 
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
                 "'" + def.getName() + "' 서비스를 목록에서 제거하시겠습니까?",
                 ButtonType.YES, ButtonType.NO);
         confirm.setTitle("서비스 제거");
         confirm.showAndWait().ifPresent(btn -> {
-            if (btn == ButtonType.YES) {
-                // Stop if running
-                if (selectedInstance.getStatus() == ServiceStatus.RUNNING) {
-                    ctx.getProcessManager().stop(selectedInstance);
-                }
-                ctx.getServiceRegistry().remove(def.getId());
-                ctx.getProcessManager().remove(def.getId());
-                instanceList.remove(selectedInstance);
+            if (btn != ButtonType.YES) return;
+            if (inst.getStatus() == ServiceStatus.RUNNING) {
+                ctx.getProcessManager().stop(inst);
+            }
+            ctx.getServiceRegistry().remove(def.getId());
+            ctx.getProcessManager().remove(def.getId());
+            instanceList.remove(inst);
+            if (inst == selectedInstance) {
                 detachSelectedServiceListeners();
                 selectedInstance = null;
-                updateStatusBar();
-                showDashboard();  // 삭제 후 대시보드로 복귀
+                showDashboard();
             }
+            updateStatusBar();
         });
     }
 

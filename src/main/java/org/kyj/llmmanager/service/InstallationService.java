@@ -15,6 +15,7 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 서비스의 설치(git clone + 의존성 설치)와 설치 여부 확인을 담당한다.
@@ -64,6 +65,26 @@ public class InstallationService {
         Platform.runLater(() -> instance.setStatus(ServiceStatus.INSTALLING));
 
         try {
+            // PYTHON 런타임이면 python/pip 가용성 선행 확인
+            if (def.getRuntimeType() == RuntimeType.PYTHON) {
+                String python = resolvePython();
+                String pip = resolvePip();
+                if (python == null) {
+                    emit(cb, "[오류] Python이 PATH에 없습니다. python 또는 python3을 먼저 설치하세요.");
+                    Platform.runLater(() -> instance.setStatus(ServiceStatus.ERROR));
+                    cb.onDone(false);
+                    return;
+                }
+                emit(cb, "[확인] Python: " + python + " ✔");
+                if (pip == null) {
+                    emit(cb, "[경고] pip가 PATH에 없습니다. pip 또는 pip3을 먼저 설치하세요.");
+                    Platform.runLater(() -> instance.setStatus(ServiceStatus.ERROR));
+                    cb.onDone(false);
+                    return;
+                }
+                emit(cb, "[확인] pip: " + pip + " ✔");
+            }
+
             // Step 1: git clone if repoUrl is set
             if (def.getRepoUrl() != null && !def.getRepoUrl().isBlank()) {
                 Path installPath = Path.of(def.getInstallDir());
@@ -222,5 +243,42 @@ public class InstallationService {
 
     private void emit(ProgressCallback cb, String msg) {
         cb.onLog(msg);
+    }
+
+    /**
+     * PATH에서 사용 가능한 python 실행 파일 이름을 반환한다.
+     *
+     * @return "python3" 또는 "python", 없으면 null
+     */
+    private String resolvePython() {
+        for (String candidate : new String[]{"python3", "python"}) {
+            if (runSilent(candidate + " --version")) return candidate;
+        }
+        return null;
+    }
+
+    /**
+     * PATH에서 사용 가능한 pip 실행 파일 이름을 반환한다.
+     *
+     * @return "pip3" 또는 "pip", 없으면 null
+     */
+    private String resolvePip() {
+        for (String candidate : new String[]{"pip3", "pip"}) {
+            if (runSilent(candidate + " --version")) return candidate;
+        }
+        return null;
+    }
+
+    private boolean runSilent(String command) {
+        try {
+            String[] cmd = PlatformUtil.isWindows()
+                    ? new String[]{"cmd.exe", "/c", command}
+                    : new String[]{"bash", "-c", command};
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            p.getInputStream().transferTo(OutputStream.nullOutputStream());
+            return p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

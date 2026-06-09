@@ -5,6 +5,7 @@
 package org.kyj.llmmanager.util;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 
 /**
  * OS 종류 감지 및 플랫폼별 기본 경로·명령어를 제공하는 유틸리티.
@@ -54,6 +55,32 @@ public class PlatformUtil {
         return path
                 .replace("${user.home}", System.getProperty("user.home"))
                 .replace("${llm.home}",  getAppHome().toString());
+    }
+
+    /**
+     * 이 프로세스를 실행 중인 JVM의 java 실행 파일 절대 경로를 반환한다.
+     * jpackage 배포 환경에서 번들 JRE를 사용하고,
+     * 일반 개발 환경에서는 현재 JDK/JRE의 java를 사용한다.
+     *
+     * <p>서비스 startCommand의 bare {@code java}를 이 경로로 치환하면
+     * 시스템 JAVA_HOME과 무관하게 항상 동일한 JRE로 서비스를 실행할 수 있다.
+     *
+     * @return java 실행 파일 절대 경로 (예: C:\app\runtime\bin\java.exe)
+     */
+    public static String getCurrentJavaExecutable() {
+        String javaHome = System.getProperty("java.home");
+        String exeName  = isWindows() ? "java.exe" : "java";
+        Path candidate  = Path.of(javaHome, "bin", exeName);
+        if (Files.exists(candidate)) {
+            return candidate.toAbsolutePath().toString();
+        }
+        // java.home이 jre/ 하위를 가리키는 구버전 JDK 대응 (JDK8 이하)
+        Path parent = Path.of(javaHome).getParent();
+        if (parent != null) {
+            Path alt = parent.resolve(Path.of("bin", exeName));
+            if (Files.exists(alt)) return alt.toAbsolutePath().toString();
+        }
+        return "java"; // 최후 폴백 — PATH 의존
     }
 
     /**

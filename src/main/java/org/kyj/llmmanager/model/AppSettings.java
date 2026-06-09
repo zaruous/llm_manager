@@ -7,6 +7,9 @@ package org.kyj.llmmanager.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.kyj.llmmanager.util.PlatformUtil;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * 사용자가 설정한 앱 환경 설정 값.
  * ~/.llm-manager/settings.json 에 영속 저장된다.
@@ -85,6 +88,9 @@ public class AppSettings {
 
     /** 스킬 라이브러리 DB 커넥션 최대 수명(ms). */
     private long skillLibraryDbMaxLifetimeMs = 1800000;
+
+    /** 플러그인별 설정값. secret 값은 저장하지 않는다. */
+    private Map<String, Map<String, String>> pluginSettings = new LinkedHashMap<>();
 
     public AppSettings() {
         // 플랫폼 기본값으로 초기화
@@ -203,5 +209,23 @@ public class AppSettings {
     public long getSkillLibraryDbMaxLifetimeMs() { return skillLibraryDbMaxLifetimeMs; }
     public void setSkillLibraryDbMaxLifetimeMs(long skillLibraryDbMaxLifetimeMs) {
         this.skillLibraryDbMaxLifetimeMs = skillLibraryDbMaxLifetimeMs;
+    }
+
+    public Map<String, Map<String, String>> getPluginSettings() { return pluginSettings; }
+    public void setPluginSettings(Map<String, Map<String, String>> pluginSettings) {
+        this.pluginSettings = pluginSettings != null ? pluginSettings : new LinkedHashMap<>();
+    }
+
+    public String getPluginSetting(String pluginId, String key, String defaultValue) {
+        Map<String, String> values = pluginSettings.get(pluginId);
+        if (values == null) return defaultValue;
+        String value = values.get(key);
+        return value != null ? value : defaultValue;
+    }
+
+    public void setPluginSetting(String pluginId, String key, String value) {
+        pluginSettings
+                .computeIfAbsent(pluginId, ignored -> new LinkedHashMap<>())
+                .put(key, value != null ? value : "");
     }
 }

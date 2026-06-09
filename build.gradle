@@ -131,16 +131,53 @@ tasks.register('runDev') {
     finalizedBy 'run'
 }
 
+// SetupCheckDialog 단독 테스트 실행
+// 사용법:
+//   ./gradlew runSetupTest                        (실제 환경 검사)
+//   ./gradlew runSetupTest --args="fail-all"      (모든 항목 강제 실패)
+//   ./gradlew runSetupTest --args="fail-python"   (Python만 실패)
+//   ./gradlew runSetupTest --args="fail-nvidia"   (NVIDIA만 실패)
+//   ./gradlew runSetupTest --args="fail-cuda"     (CUDA만 실패)
+tasks.register('runSetupTest', JavaExec) {
+    group = 'application'
+    description = 'SetupCheckDialog 단독 테스트 실행'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.kyj.llmmanager.setup.SetupCheckDialogTest'
+    def rawArgs = project.findProperty('args') ?: ''
+    args = rawArgs ? ["--setup-test=${rawArgs}"] : ['--setup-test']
+    // OpenJFX 플러그인이 커스텀 JavaExec 태스크에는 자동 적용되지 않으므로 수동으로 설정
+    doFirst {
+        def sep = System.properties['os.name'].toLowerCase().contains('windows') ? ';' : ':'
+        def javafxJars = configurations.runtimeClasspath.files
+            .findAll { it.name.startsWith('javafx-') }
+            .collect { it.absolutePath }
+            .join(sep)
+        jvmArgs '--module-path', javafxJars,
+                '--add-modules', 'javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base'
+    }
+}
+
 // 배포판에 기본 제공 서비스 정의 파일 포함
 distributions {
     main {
         contents {
-            from('lib/def') {
-                into('lib/def')
+            // 환경 설치 스크립트 — SetupCheckDialog가 bin/install-*.ps1 경로로 탐색
+            from('bin') {
+                include 'install-python.ps1'
+                include 'install-nvidia-driver.ps1'
+                into('bin')
+            }
+            from('service-packs') {
+                include '*.yml'
+                include '*.yaml'
+                into('service-packs')
             }
             from('lib/cursor') {
                 include 'skill-library.sqlite'
                 into 'lib/cursor'
+            }
+            from('plugins') {
+                into 'lib/plugins'
             }
             from('lib') {
                 include 'sql-gen-mcp-1.0.0-SNAPSHOT.jar'
@@ -188,15 +225,37 @@ tasks.register('generatePackageIcons') {
 // 1단계: installDist 결과물의 lib/ 구조를 유지해 jpackage 입력 디렉토리로 복사
 tasks.register('prepareJpackageInput', Copy) {
     group       = 'distribution'
-    description = 'jpackage 입력 디렉토리를 준비합니다 (lib/JARs + lib/def/)'
+    description = 'jpackage 입력 디렉토리를 준비합니다 (lib/JARs + service-packs/ + bin/scripts)'
     dependsOn installDist
     doFirst {
         delete layout.buildDirectory.dir('jpackage-input')
     }
+    // lib/ 과 bin/ 을 같은 레벨에 두기 위해 into 를 jpackage-input/ 으로 설정하고
+    // 각 소스를 서브디렉토리로 매핑한다.
+    into layout.buildDirectory.dir('jpackage-input')
+
     // build/install/<name>/lib/ 에는 이미 JARs 와 def/ 서브폴더가 있다.
-    // jpackage 앱 내부에서도 app/lib/... 구조를 유지한다.
-    from layout.buildDirectory.dir("install/${project.name}/lib")
-    into layout.buildDirectory.dir('jpackage-input/lib')
+    from(layout.buildDirectory.dir("install/${project.name}/lib")) {
+        into 'lib'
+    }
+
+    // 환경 설치 스크립트: bin/ → app/bin/
+    // SetupCheckDialog.resolveScript()가 app/lib/JAR 위치에서 상위(app/)로 거슬러
+    // app/bin/install-*.ps1 을 탐색한다.
+    from(project.file('bin')) {
+        include 'install-python.ps1'
+        include 'install-nvidia-driver.ps1'
+        into 'bin'
+    }
+
+    // 서비스 팩 YAML: service-packs/ → app/service-packs/
+    // ServicePackLoader.resolvePacksDir()이 app/lib/JAR 위치에서 상위(app/)로 거슬러
+    // app/service-packs/*.yml 을 탐색한다.
+    from(project.file('service-packs')) {
+        include '*.yml'
+        include '*.yaml'
+        into 'service-packs'
+    }
 }
 
 // 2-A: app-image (폴더 구조) — WiX 없이 빌드 가능, zip 으로 배포
@@ -210,6 +269,10 @@ tasks.register('jpackageImage', Exec) {
     }
     doLast {
         stripBundledServiceJarsFromLauncherConfig(project)
+        // jpackage는 번들 runtime/bin/에서 java.exe를 제거한다.
+        // 서비스 JAR 실행 시 필요하므로, 빌드 JDK의 java.exe를 복사해 둔다.
+        // java.exe는 jli.dll을 호출하는 얇은 래퍼이고, jli.dll은 이미 runtime/bin/에 있다.
+        copyJavaExeToRuntime(project)
     }
 }
 
@@ -334,6 +397,32 @@ List<String> buildJpackageInstallerArgs(String type, Project proj) {
         ]
     }
     return cmd
+}
+
+/**
+ * jpackage가 번들 런타임에서 java.exe를 제거하므로, 빌드 JDK의 java.exe를
+ * runtime/bin/ 에 복사한다. java.exe는 jli.dll 래퍼이고 jli.dll은 이미 존재한다.
+ */
+void copyJavaExeToRuntime(Project proj) {
+    def os = org.gradle.internal.os.OperatingSystem.current()
+    def exeName = os.windows ? 'java.exe' : 'java'
+    def javaExe  = new File(System.getProperty('java.home'), "bin/${exeName}")
+    def runtimeBin = proj.layout.buildDirectory
+            .dir('installer/LLMManager/runtime/bin').get().asFile
+
+    if (!javaExe.exists()) {
+        println "  [warn] copyJavaExeToRuntime: ${javaExe} not found, skipping"
+        return
+    }
+    if (!runtimeBin.exists()) {
+        println "  [warn] copyJavaExeToRuntime: runtime/bin not found, skipping"
+        return
+    }
+    proj.copy {
+        from javaExe
+        into runtimeBin
+    }
+    println "  [ok] Copied ${javaExe.name} → runtime/bin/"
 }
 
 /**

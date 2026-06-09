@@ -7,6 +7,7 @@ package org.kyj.llmmanager;
 import atlantafx.base.theme.NordDark;
 import org.kyj.llmmanager.service.AppConfigLoader;
 import org.kyj.llmmanager.service.DevHotReloader;
+import org.kyj.llmmanager.setup.SetupCheckDialog;
 import org.kyj.llmmanager.ui.controller.MainController;
 import org.kyj.llmmanager.util.AppIconFactory;
 import org.kyj.llmmanager.util.SceneFactory;
@@ -37,7 +38,7 @@ public class LlmManagerApp extends Application {
     }
 
     /**
-     * 앱 메인 진입. Stage 속성을 한 번 설정하고 Scene을 로드한다.
+     * 앱 메인 진입. 환경 체크 → AppContext 초기화 → 메인 창 표시 순으로 실행한다.
      * 개발 모드이면 DevHotReloader를 시작한다.
      *
      * @param primaryStage JavaFX가 제공하는 기본 창
@@ -47,6 +48,12 @@ public class LlmManagerApp extends Application {
     public void start(Stage primaryStage) throws Exception {
         Platform.setImplicitExit(false);
         Application.setUserAgentStylesheet(new NordDark().getUserAgentStylesheet());
+
+        // CSS를 SetupCheckDialog 보다 먼저 등록해야 다이얼로그에도 동일 스타일이 적용된다
+        SceneFactory.init(cssUrl("app.css"));
+
+        // 환경 체크 다이얼로그 — '계속' 또는 '건너뜀' 클릭 시 반환
+        new SetupCheckDialog().showAndWait();
 
         AppContext ctx = AppContext.getInstance();
         ctx.init();
@@ -68,9 +75,6 @@ public class LlmManagerApp extends Application {
                 Platform.exit();
             }
         });
-
-        // SceneFactory에 CSS URL 등록 — 이후 모든 팝업이 동일 스타일 적용
-        SceneFactory.init(cssUrl("app.css"));
 
         applyScene(primaryStage, ctx, 1100, 700);
 

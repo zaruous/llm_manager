@@ -19,8 +19,8 @@ public class AppContext {
     private AppSettingsRepository appSettingsRepository;
     /** 사용자 서비스 정의 목록 관리 (services.json) */
     private ServiceRegistry serviceRegistry;
-    /** lib/def/ 에서 기본 제공 서비스 정의를 로드하는 로더 */
-    private BuiltinServiceLoader builtinServiceLoader;
+    /** service-packs/*.yml 에서 서비스 팩 정의를 로드하는 로더 */
+    private ServicePackLoader servicePackLoader;
     /** 개발 모드 FXML/CSS 핫 리로더. 프로덕션에서는 비활성. */
     private DevHotReloader devHotReloader;
     /** 서비스 프로세스 생명주기 관리 */
@@ -41,6 +41,12 @@ public class AppContext {
     private EmbeddedApiServer apiServer;
     /** 시스템 CPU·메모리 수집 서비스 (OSHI 기반). */
     private SystemMonitorService systemMonitor;
+    /** 로컬 플러그인 manifest 로더 및 registry. */
+    private PluginManager pluginManager;
+    /** 신뢰된 앱 내부 플러그인 command 실행기. */
+    private PluginCommandExecutor pluginCommandExecutor;
+    /** 플러그인 런타임 의존성 설치 서비스. */
+    private PluginDependencyInstaller pluginDependencyInstaller;
 
     private AppContext() {}
 
@@ -54,8 +60,12 @@ public class AppContext {
     public void init() {
         appSettingsRepository = new AppSettingsRepository();
         appSettingsRepository.load();
+        pluginManager = new PluginManager();
+        pluginManager.load();
+        pluginCommandExecutor = new PluginCommandExecutor(pluginManager, appSettingsRepository);
+        pluginDependencyInstaller = new PluginDependencyInstaller();
         devHotReloader    = new DevHotReloader();
-        builtinServiceLoader = new BuiltinServiceLoader();
+        servicePackLoader = new ServicePackLoader();
         serviceRegistry = new ServiceRegistry();
         serviceRegistry.load();
         logService = new LogService();
@@ -119,7 +129,7 @@ public class AppContext {
     public EmbeddedApiServer getApiServer() { return apiServer; }
     public SystemMonitorService getSystemMonitor() { return systemMonitor; }
     public ServiceRegistry getServiceRegistry() { return serviceRegistry; }
-    public BuiltinServiceLoader getBuiltinServiceLoader() { return builtinServiceLoader; }
+    public ServicePackLoader getServicePackLoader() { return servicePackLoader; }
     public DevHotReloader getDevHotReloader() { return devHotReloader; }
     public ProcessManager getProcessManager() { return processManager; }
     public LogService getLogService() { return logService; }
@@ -128,4 +138,7 @@ public class AppContext {
     public SystemTrayManager getTrayManager() { return trayManager; }
     public LlmSkillInstaller getLlmSkillInstaller() { return llmSkillInstaller; }
     public ProjectRegistry getProjectRegistry() { return projectRegistry; }
+    public PluginManager getPluginManager() { return pluginManager; }
+    public PluginCommandExecutor getPluginCommandExecutor() { return pluginCommandExecutor; }
+    public PluginDependencyInstaller getPluginDependencyInstaller() { return pluginDependencyInstaller; }
 }

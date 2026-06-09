@@ -3,51 +3,107 @@ description: "BAAI/bge-m3 embedding model server (FastAPI)"
 runtimeType: PYTHON
 repoUrl: "https://github.com/zaruous/bgem3-pyserver"
 startCommand: "python server.py"
-port: 3000
+port: 18080
 healthCheckPath: /health
 installCommands:
-  - "pip install fastapi \"uvicorn[standard]\" FlagEmbedding torch pydantic numpy"
+  - "pip install -r requirements.txt"
 argSpecs:
   - name: port
     flag: "--port"
     type: INTEGER
-    defaultValue: "3000"
+    defaultValue: "18080"
     description: "서버 포트"
+    enabled: true
   - name: device
     flag: "--device"
     type: SELECT
     defaultValue: "auto"
     options: [auto, cpu, cuda, mps]
     description: "연산 장치"
+    enabled: true
   - name: fp16
     flag: "--fp16"
     type: BOOLEAN
     defaultValue: "false"
     description: "FP16 모드 (CUDA 권장)"
+    enabled: true
   - name: batch-size
     flag: "--batch-size"
     type: INTEGER
     defaultValue: "32"
     description: "배치 크기"
+    enabled: true
   - name: model
     flag: "--model"
     type: STRING
     defaultValue: "BAAI/bge-m3"
     description: "모델 이름"
+    enabled: true
+  - name: install-type
+    flag: ""
+    type: SELECT
+    defaultValue: "cuda"
+    options: [cuda, cpu, auto]
+    description: "[설치 설정] PyTorch 설치 방식. cuda=CUDA 빌드(CPU도 호환), cpu=CPU 전용, auto=CUDA 자동 감지"
+    enabled: false
+  - name: cuda-version
+    flag: ""
+    type: SELECT
+    defaultValue: "cu121"
+    options: [cu124, cu121, cu118]
+    description: "[설치 설정] CUDA 버전. install-type=cuda 또는 auto 감지 시 사용"
+    enabled: false
 groovyScript: |
-  // 환경변수 INSTALL_BASE가 있으면 우선 사용, 없으면 홈 디렉토리 기본값
+  // installDir: 서버 파일을 설치할 경로
   service.installDir = env('INSTALL_BASE') ?: (userHome + '/llm-services/bgem3-pyserver')
   service.workingDir = service.installDir
 
-  // OS별 python 명령어 분기
+  // OS별 python 명령어
   if (os == 'windows') {
       service.startCommand = 'python server.py'
   } else {
       service.startCommand = 'python3 server.py'
   }
 
-  // CUDA 환경이면 fp16 기본값을 true로
-  if (env('CUDA_VISIBLE_DEVICES') != null) {
+  // install-type / cuda-version argValue 읽기 (기본값 fallback)
+  def installType = service.argValues?.get('install-type') ?: 'auto'
+  def cudaVer     = service.argValues?.get('cuda-version') ?: 'cu121'
+
+  def useCuda = false
+
+  if (installType == 'cuda') {
+      useCuda = true
+  } else if (installType == 'auto') {
+      // 1차: CUDA_PATH 환경변수 (Windows CUDA 인스톨러가 설정)
+      def cudaPath = env('CUDA_PATH') ?: env('CUDA_HOME')
+      if (cudaPath) {
+          useCuda = true
+      } else {
+          // 2차: nvcc --version 실행으로 이중 확인
+          try {
+              def cmd = (os == 'windows')
+                  ? ['cmd', '/c', 'nvcc', '--version']
+                  : ['nvcc', '--version']
+              def proc = cmd.execute()
+              proc.waitForOrKill(5000)
+              useCuda = (proc.exitValue() == 0)
+          } catch (Exception e) {
+              useCuda = false
+          }
+      }
+  }
+  // installType == 'cpu' → useCuda = false 유지
+
+  if (useCuda) {
+      service.installCommands = [
+          "pip install -r requirements.txt",
+          "pip install torch>=2.6.0 --index-url https://download.pytorch.org/whl/${cudaVer}"
+      ]
+      // CUDA 환경이면 fp16 기본값 true
       def fp16Spec = service.argSpecs.find { it.name == 'fp16' }
       if (fp16Spec) fp16Spec.defaultValue = 'true'
+  } else {
+      service.installCommands = [
+          "pip install -r requirements.txt"
+      ]
   }
