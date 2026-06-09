@@ -16,6 +16,8 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 
+import java.util.function.Consumer;
+
 /**
  * 서비스 목록(ListView)의 각 행을 렌더링하는 셀.
  * 상태 색상 점, 이름, 상태 텍스트, 포트를 표시한다.
@@ -40,8 +42,15 @@ public class ServiceListCell extends ListCell<ServiceInstance> {
     private ChangeListener<ServiceStatus> statusListener;
     /** 현재 이 셀에 바인딩된 ServiceInstance. 재활용 시 이전 리스너를 해제하는 데 필요. */
     private ServiceInstance boundItem;
+    /** 제거 요청 시 호출할 콜백. MainController가 실제 제거 로직을 담당한다. */
+    private final Consumer<ServiceInstance> onRemove;
 
-    public ServiceListCell() {
+    /**
+     * @param onRemove 제거 메뉴 선택 시 호출할 콜백 (확인 다이얼로그 포함)
+     */
+    public ServiceListCell(Consumer<ServiceInstance> onRemove) {
+        this.onRemove = onRemove;
+
         statusDot = new Circle(5);
         nameLabel = new Label();
         nameLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
@@ -55,10 +64,16 @@ public class ServiceListCell extends ListCell<ServiceInstance> {
         container.setAlignment(Pos.CENTER_LEFT);
         container.setPadding(new Insets(8, 12, 8, 12));
 
-        // 우클릭 컨텍스트 메뉴 — 이름 변경
         MenuItem renameItem = new MenuItem("이름 변경");
         renameItem.setOnAction(e -> handleRename());
-        setContextMenu(new ContextMenu(renameItem));
+
+        MenuItem removeItem = new MenuItem("제거");
+        removeItem.setOnAction(e -> {
+            ServiceInstance inst = getItem();
+            if (inst != null) onRemove.accept(inst);
+        });
+
+        setContextMenu(new ContextMenu(renameItem, new SeparatorMenuItem(), removeItem));
     }
 
     /**

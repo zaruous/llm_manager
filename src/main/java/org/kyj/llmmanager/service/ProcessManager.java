@@ -97,7 +97,17 @@ public class ProcessManager {
             String workDir = def.getWorkingDir() != null ? def.getWorkingDir()
                     : def.getInstallDir();
 
-            ProcessBuilder pb = new ProcessBuilder(CommandBuilder.splitCommand(command));
+            List<String> tokens = CommandBuilder.splitCommand(command);
+            // bare "java" / "java.exe"를 이 프로세스를 실행 중인 JVM 절대 경로로 치환한다.
+            // jpackage 번들 JRE와 시스템 JAVA_HOME이 다를 때 버전 불일치를 방지한다.
+            if (!tokens.isEmpty()) {
+                String exe = tokens.get(0);
+                if (exe.equalsIgnoreCase("java") || exe.equalsIgnoreCase("java.exe")) {
+                    tokens.set(0, PlatformUtil.getCurrentJavaExecutable());
+                }
+            }
+
+            ProcessBuilder pb = new ProcessBuilder(tokens);
             if (workDir != null && !workDir.isBlank()) {
                 File dir = new File(workDir);
                 if (!dir.exists() || !dir.isDirectory()) {
