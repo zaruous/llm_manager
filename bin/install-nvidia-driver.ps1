@@ -46,6 +46,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Callers (e.g. the Java setup dialog) read our output as UTF-8;
+# Windows PowerShell 5.1 defaults to the OEM codepage, so force UTF-8.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+
 # ─────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────
@@ -156,16 +160,14 @@ function Download-File {
     Write-Info "URL : $Url"
     Write-Info "Dest: $Dest"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $wc = New-Object System.Net.WebClient
-    $wc.DownloadProgressChanged += {
-        $pct = $_.ProgressPercentage
-        if ($pct % 10 -eq 0) {
-            Write-Host "`r    Progress: $pct %" -NoNewline -ForegroundColor DarkCyan
-        }
+    # PS 5.1's Invoke-WebRequest progress bar slows downloads drastically — disable it
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
+    } finally {
+        $ProgressPreference = $prevProgress
     }
-    $task = $wc.DownloadFileTaskAsync($Url, $Dest)
-    $task.Wait()
-    Write-Host ""
     if (-not (Test-Path $Dest)) { throw "Download failed: file not found after download" }
 }
 
@@ -180,12 +182,30 @@ Write-Host "============================================" -ForegroundColor Magen
 
 if (-not (Test-Admin)) {
     Write-Warn "No administrator privileges -- driver installation requires admin rights."
-    Write-Warn "Please re-run this script as Administrator."
+    Write-Warn "Requesting elevation (UAC prompt)..."
     Write-Host ""
-    $argList = "-ExecutionPolicy Bypass -File `"$PSCommandPath`" " +
-               ($PSBoundParameters.GetEnumerator() | ForEach-Object { "-$($_.Key) $($_.Value)" } | Join-String -Separator " ")
-    Start-Process powershell -ArgumentList $argList -Verb RunAs
-    exit
+
+    # Rebuild arguments PS 5.1-compatible (Join-String is PS 6.2+ only).
+    # Switch parameters must be re-passed as bare flags, not "-Name True".
+    $argList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"")
+    foreach ($kv in $PSBoundParameters.GetEnumerator()) {
+        if ($kv.Value -is [System.Management.Automation.SwitchParameter] -or $kv.Value -is [bool]) {
+            if ($kv.Value) { $argList += "-$($kv.Key)" }
+        } else {
+            $argList += "-$($kv.Key)"
+            $argList += "$($kv.Value)"
+        }
+    }
+
+    try {
+        # -Wait so the caller (Java dialog) sees the real result, not an instant exit 0
+        $elevated = Start-Process powershell -ArgumentList $argList -Verb RunAs -Wait -PassThru
+        exit $elevated.ExitCode
+    } catch {
+        # User declined the UAC prompt
+        Write-Fail "Elevation cancelled -- installation aborted."
+        exit 1
+    }
 }
 Write-Ok "Administrator privileges confirmed"
 
@@ -495,7 +515,10 @@ if (Test-Path $cudaBase) {
     $cudaBin = "$cudaBase\bin"
     $sysPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 
-    if ($sysPath -notlike "*$cudaBin*") {
+    # Compare exact PATH entries — substring matching gives false positives
+    $sysPathItems = $sysPath -split ';' | Where-Object { $_ }
+
+    if ($sysPathItems -notcontains $cudaBin) {
         [System.Environment]::SetEnvironmentVariable("Path", "$cudaBin;$sysPath", "Machine")
         Write-Ok "Added to PATH: $cudaBin"
     } else {

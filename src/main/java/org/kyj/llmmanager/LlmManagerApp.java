@@ -8,6 +8,9 @@ import atlantafx.base.theme.NordDark;
 import org.kyj.llmmanager.service.AppConfigLoader;
 import org.kyj.llmmanager.service.DevHotReloader;
 import org.kyj.llmmanager.setup.SetupCheckDialog;
+import org.kyj.llmmanager.setup.SetupChecker;
+import org.kyj.llmmanager.setup.SetupItem;
+import org.kyj.llmmanager.util.PlatformUtil;
 import org.kyj.llmmanager.ui.controller.MainController;
 import org.kyj.llmmanager.util.AppIconFactory;
 import org.kyj.llmmanager.util.SceneFactory;
@@ -52,8 +55,18 @@ public class LlmManagerApp extends Application {
         // CSS를 SetupCheckDialog 보다 먼저 등록해야 다이얼로그에도 동일 스타일이 적용된다
         SceneFactory.init(cssUrl("app.css"));
 
-        // 환경 체크 다이얼로그 — '계속' 또는 '건너뜀' 클릭 시 반환
-        new SetupCheckDialog().showAndWait();
+        // 환경 체크 — 설치 스크립트가 PowerShell 기반이라 Windows에서만 수행.
+        // 모든 항목이 이미 설치돼 있으면 다이얼로그를 띄우지 않는다.
+        if (PlatformUtil.isWindows()) {
+            SetupChecker checker = new SetupChecker();
+            java.util.Map<SetupItem, Boolean> results = checker.checkAll();
+            if (results.containsValue(false)) {
+                // '계속' 또는 '건너뜀' 클릭 시 반환 — 사전 검사 결과를 시드해 중복 검사 방지
+                new SetupCheckDialog(checker, results).showAndWait();
+            } else {
+                log.info("[setup] 모든 환경 항목 통과 — 환경 체크 다이얼로그 생략");
+            }
+        }
 
         AppContext ctx = AppContext.getInstance();
         ctx.init();

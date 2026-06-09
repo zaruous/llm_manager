@@ -4,6 +4,7 @@
  */
 package org.kyj.llmmanager.setup;
 
+import org.kyj.llmmanager.util.PlatformUtil;
 import org.kyj.llmmanager.util.SceneFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,10 +12,11 @@ import org.slf4j.LoggerFactory;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.BorderPane;
@@ -58,6 +60,9 @@ public class SetupCheckDialog {
 
     private final SetupChecker checker;
 
+    /** 사전 검사 결과. null이 아니면 최초 검사를 생략하고 이 결과를 그대로 반영한다. */
+    private Map<SetupItem, Boolean> initialResults;
+
     public SetupCheckDialog() {
         this.checker = new SetupChecker();
     }
@@ -65,6 +70,18 @@ public class SetupCheckDialog {
     /** 테스트 전용 생성자 — 항목별 결과를 미리 지정한 checker를 주입한다. */
     public SetupCheckDialog(SetupChecker checker) {
         this.checker = checker;
+    }
+
+    /**
+     * 사전 검사 결과를 시드해 중복 검사 없이 다이얼로그를 표시하는 생성자.
+     * 설치 후 재검사는 주입된 checker로 정상 수행한다.
+     *
+     * @param checker        설치 후 재검사에 사용할 체커
+     * @param initialResults checkAll()로 얻은 항목별 사전 검사 결과
+     */
+    public SetupCheckDialog(SetupChecker checker, Map<SetupItem, Boolean> initialResults) {
+        this.checker = checker;
+        this.initialResults = initialResults;
     }
     /** 설치 스크립트가 실행 중인지 추적 — 중복 실행 방지 */
     private final AtomicBoolean installing = new AtomicBoolean(false);
@@ -78,8 +95,10 @@ public class SetupCheckDialog {
         stage.initModality(Modality.APPLICATION_MODAL);
         stage.setTitle("환경 설정 확인");
         stage.setResizable(false);
-        // 사용자가 창을 직접 닫으면 건너뜀으로 처리
-        stage.setOnCloseRequest(e -> stage.close());
+        // 사용자가 창을 직접 닫으면 건너뜀으로 처리 — 필수 항목 미통과 시 확인을 받는다
+        stage.setOnCloseRequest(e -> {
+            if (!confirmSkipIfNeeded()) e.consume();
+        });
 
         stage.setScene(SceneFactory.create(buildRoot(), 640));
         SceneFactory.autoHeight(stage);
@@ -184,13 +203,11 @@ public class SetupCheckDialog {
         Label logTitle = bold("설치 로그");
         logTitle.setPadding(new Insets(8, 0, 4, 0));
 
-        ScrollPane scroll = new ScrollPane(logArea);
-        scroll.setFitToWidth(true);
-        scroll.setPadding(new Insets(0, 20, 0, 20));
-
-        VBox center = new VBox(grid, new Separator(), logTitle, scroll);
-        VBox.setVgrow(scroll, Priority.ALWAYS);
+        // TextArea는 자체 스크롤을 제공하므로 ScrollPane으로 감싸지 않는다
+        VBox center = new VBox(grid, new Separator(), logTitle, logArea);
+        VBox.setVgrow(logArea, Priority.ALWAYS);
         VBox.setMargin(logTitle, new Insets(0, 0, 0, 20));
+        VBox.setMargin(logArea, new Insets(0, 20, 0, 20));
 
         // 체크리스트 렌더 완료 후 비동기로 전체 검사 시작
         Platform.runLater(this::runAllChecks);
@@ -205,7 +222,9 @@ public class SetupCheckDialog {
         continueBtn.setOnAction(e -> stage.close());
 
         Button skipBtn = new Button("건너뜀");
-        skipBtn.setOnAction(e -> stage.close());
+        skipBtn.setOnAction(e -> {
+            if (confirmSkipIfNeeded()) stage.close();
+        });
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -226,6 +245,18 @@ public class SetupCheckDialog {
      * 검사 중 UI 블로킹을 막기 위해 별도 스레드에서 실행한다.
      */
     private void runAllChecks() {
+        // 사전 검사 결과가 시드됐으면 재검사 없이 그대로 반영 (앱 기동 시 중복 검사 방지)
+        if (initialResults != null) {
+            Map<SetupItem, Boolean> seed = initialResults;
+            initialResults = null;
+            for (SetupItem item : SetupItem.values()) {
+                boolean ok = Boolean.TRUE.equals(seed.get(item));
+                results.put(item, ok);
+                setStatus(item, ok ? CheckStatus.OK : CheckStatus.FAIL);
+            }
+            Platform.runLater(this::refreshContinueButton);
+            return;
+        }
         new Thread(() -> {
             for (SetupItem item : SetupItem.values()) {
                 setStatus(item, CheckStatus.CHECKING);
@@ -262,6 +293,12 @@ public class SetupCheckDialog {
      * @param item 설치할 항목
      */
     private void startInstall(SetupItem item) {
+        // 설치 스크립트가 PowerShell 기반이라 Windows 외 OS에서는 자동 설치 불가
+        if (!PlatformUtil.isWindows()) {
+            appendLog("[안내] 자동 설치는 Windows에서만 지원됩니다. " +
+                    item.getDisplayName() + "을(를) 수동으로 설치해 주세요.");
+            return;
+        }
         if (installing.getAndSet(true)) {
             appendLog("다른 설치가 진행 중입니다. 완료 후 다시 시도하세요.");
             return;
@@ -286,6 +323,8 @@ public class SetupCheckDialog {
                         "-File", script.toAbsolutePath().toString()));
                 if (item == SetupItem.NVIDIA_DRIVER || item == SetupItem.CUDA) {
                     cmd.add("-NonInteractive");
+                    // 항목에 해당하는 구성 요소만 설치 — CUDA 버튼이 드라이버(수백 MB)까지 받지 않도록
+                    cmd.add(item == SetupItem.CUDA ? "-SkipDriver" : "-SkipCuda");
                 }
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.redirectErrorStream(true);
@@ -377,6 +416,29 @@ public class SetupCheckDialog {
             }
         }
         continueBtn.setDisable(!allRequiredOk);
+    }
+
+    /**
+     * 필수 항목이 미설치로 확인된 상태에서 건너뛰려 할 때 사용자 확인을 받는다.
+     * 검사가 끝나지 않은(결과 없음) 항목은 차단하지 않는다.
+     *
+     * @return 건너뛰어도 되면 true
+     */
+    private boolean confirmSkipIfNeeded() {
+        boolean requiredFailed = false;
+        for (SetupItem item : SetupItem.values()) {
+            if (item.isRequired() && Boolean.FALSE.equals(results.get(item))) {
+                requiredFailed = true;
+                break;
+            }
+        }
+        if (!requiredFailed) return true;
+
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("환경 설정 건너뜀");
+        alert.setHeaderText("필수 항목이 아직 설치되지 않았습니다.");
+        alert.setContentText("Python 3 없이 진행하면 BGE-M3 서버를 실행할 수 없습니다.\n그래도 건너뛸까요?");
+        return alert.showAndWait().filter(b -> b == ButtonType.OK).isPresent();
     }
 
     private void appendLog(String line) {

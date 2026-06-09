@@ -23,6 +23,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Callers (e.g. the Java setup dialog) read our output as UTF-8;
+# Windows PowerShell 5.1 defaults to the OEM codepage, so force UTF-8.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+
 # ─────────────────────────────────────────────
 # Utilities
 # ─────────────────────────────────────────────
@@ -91,12 +95,11 @@ if (-not $existingVersion) {
     }
 }
 
+# Nothing to do when already installed — this script is normally launched
+# from a GUI dialog, so no interactive reinstall prompt.
 if ($existingVersion) {
     Write-Ok "Python is already installed: $existingVersion"
     Write-Ok "Path: $pythonExe"
-    Write-Host ""
-    Write-Host "Press Ctrl+C to cancel, or wait 5 seconds to continue with reinstall." -ForegroundColor Yellow
-    Start-Sleep -Seconds 5
     if (-not $NoExit) { exit 0 }
 }
 
@@ -206,8 +209,12 @@ $pathsToAdd = @(
     (Join-Path $InstallDir "Scripts")
 )
 
+# Compare exact PATH entries — substring matching ("*$p*") gives false
+# positives (e.g. C:\Python312 vs C:\Python3123)
+$envPathItems = $envPath -split ';' | Where-Object { $_ }
+
 foreach ($p in $pathsToAdd) {
-    if ($envPath -notlike "*$p*") {
+    if ($envPathItems -notcontains $p) {
         $envPath = "$p;$envPath"
         [System.Environment]::SetEnvironmentVariable("Path", $envPath, $scope)
         Write-Ok "Added to PATH: $p"
