@@ -5,8 +5,9 @@
 JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 - 서비스 등록·시작·중지·설치·로그 모니터링
 - 개발 모드 핫 리로드 (FXML/CSS/DEF 파일 감시)
-- 기본 제공 서비스 정의 (`lib/def/`)와 사용자 서비스 (`~/llm-services/services.json`) 분리
+- 기본 제공 서비스 정의 (`service-packs/*.yml`)와 사용자 서비스 (`~/llm-services/services.json`) 분리
 - LLM 스킬 팩 설치와 외부 디렉토리 스킬·룰 파일 로드
+- 플러그인 시스템: Cursor 에이전트 러너 포함
 
 ## 주요 경로
 
@@ -15,8 +16,10 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 | `src/main/java/org/kyj/llmmanager/` | Java 소스 루트 |
 | `src/main/resources/org/kyj/llmmanager/` | FXML / CSS / 도움말 리소스 |
 | `src/main/resources/llm-skills/` | Claude/Copilot/Cursor/Gemini 스킬 팩 리소스 |
-| `lib/def/` | 기본 제공 서비스 JSON (배포 포함) |
+| `service-packs/` | 기본 제공 서비스 YAML (배포 포함). `ServicePackLoader`가 로드 |
+| `bin/` | 배포·설치 PowerShell 스크립트 |
 | `lib/hotswap/hotswap-agent.jar` | 개발용 HotswapAgent (gitignore) |
+| `lib/*.jar` | 번들 JAR (gitignore — 100 MB 초과) |
 | `~/llm-services/services.json` | 사용자 서비스 목록 (런타임) |
 | `~/llm-services/settings.json` | 앱 설정 |
 | `~/llm-services/projects.json` | LLM 스킬 설치 히스토리 |
@@ -32,13 +35,56 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 ./gradlew runDev
 ```
 
+## 배포 (jpackage)
+
+```powershell
+# 배포 이미지 생성 (Windows installer .exe)
+./gradlew jpackageImage
+
+# 산출물 위치
+build/installer/LLMManager/
+```
+
+배포 구조:
+```
+LLMManager/
+├── app/
+│   ├── lib/           ← 앱 JAR + 의존성
+│   ├── bin/           ← PowerShell 스크립트 (*.ps1)
+│   └── service-packs/ ← 서비스 YAML 팩
+└── runtime/
+    └── bin/
+        └── java.exe   ← jpackage가 제거하므로 doLast로 복사
+```
+
+> **주의**: jpackage는 번들 JRE에서 `java.exe`를 제거한다. `build.gradle`의 `copyJavaExeToRuntime()` 헬퍼가 빌드 JDK에서 `runtime/bin/`으로 복사한다.
+
+## service-packs
+
+`service-packs/*.yml`은 내장 서비스 정의 파일이다. `ServicePackLoader.resolvePacksDir()`이 두 단계로 경로를 탐색한다.
+
+1. 실행 디렉토리의 `service-packs/` (개발 모드)
+2. JAR 위치에서 상위 2단계까지 `service-packs/` 탐색 (배포 모드)
+
+각 YAML에는 선택적으로 `groovyScript`를 포함할 수 있다. 스크립트 바인딩:
+
+| 변수 | 설명 |
+|------|------|
+| `service` | `ServiceDefinition` 인스턴스 (변경 가능) |
+| `os` | `"windows"` / `"linux"` / `"mac"` |
+| `userHome` | 사용자 홈 디렉토리 |
+| `arch` | `"x86_64"` 등 |
+| `env(name)` | 환경변수 조회 클로저 |
+
 ## 빌드 상태
 
-`./gradlew build` 정상 통과 (2026-06-07 기준).
+`./gradlew build` 정상 통과 (2026-06-10 기준).
 
-- HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 의존성 추가로 `LlmSkillLibraryRepository` 컴파일 해소
-- `AppSettings`에 `getSkillLibraryDb*()` getter 추가 완료
-- `SkillFile`에 `libraryFileId` 필드 및 getter/setter 추가 완료
+- `BuiltinServiceLoader` 제거 → `ServicePackLoader`로 일원화
+- `service-packs/` 디렉토리: `bgem3-embedding.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`
+- `bgem3-embedding.yml`: CUDA 자동 감지(CUDA_PATH + nvcc), install-type/cuda-version argSpec 추가
+- 서비스 목록 우클릭 컨텍스트 메뉴에 "제거" 기능 추가
+- HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 의존성으로 `LlmSkillLibraryRepository` 컴파일
 
 현재 UI의 "로드" 탭은 선택 파일을 대상 프로젝트에 복사한다 (DB 저장은 미연결).
 
