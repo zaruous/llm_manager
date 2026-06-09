@@ -94,5 +94,6 @@ jobs:
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File bin\install-nvidia-driver.ps1 -NonInteractive -SkipCuda
-          if ($LASTEXITCODE -eq 1) { Write-Host "OK: no-GPU path exited 1 as expected" }
-          else { Write-Error "expected exit 1, got $LASTEXITCODE"; exit 1 }
+          # GitHub Actions가 스텝 끝에 exit $LASTEXITCODE를 덧붙이므로 성공 시 exit 0 명시
+          if ($LASTEXITCODE -eq 1) { Write-Host "OK: no-GPU path exited 1 as expected"; exit 0 }
+          Write-Error "expected exit 1, got $LASTEXITCODE"; exit 1
