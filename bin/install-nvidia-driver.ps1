@@ -50,6 +50,16 @@ $ErrorActionPreference = "Stop"
 # Windows PowerShell 5.1 defaults to the OEM codepage, so force UTF-8.
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
+# Authenticated corporate proxies (NTLM/Kerberos) return 407 for anonymous
+# requests; attach the Windows logon credentials to the system proxy.
+$defaultProxy = [System.Net.WebRequest]::DefaultWebProxy
+if ($defaultProxy) {
+    $defaultProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+}
+
+# Pre-staged installers placed here are used without downloading (air-gapped networks)
+$OFFLINE_DIR = Join-Path $env:USERPROFILE "llm-services\installers"
+
 # ─────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────
@@ -155,16 +165,40 @@ function Get-DriverVersionFromString {
     return $null
 }
 
+function Get-EnvProxy {
+    foreach ($name in @('HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy')) {
+        $v = [Environment]::GetEnvironmentVariable($name)
+        if ($v) { return $v }
+    }
+    return $null
+}
+
+function Find-OfflineInstaller {
+    param([string]$Pattern)
+    if (-not (Test-Path $OFFLINE_DIR)) { return $null }
+    $f = Get-ChildItem $OFFLINE_DIR -Filter $Pattern -File -ErrorAction SilentlyContinue |
+         Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($f) { return $f.FullName }
+    return $null
+}
+
 function Download-File {
     param([string]$Url, [string]$Dest)
     Write-Info "URL : $Url"
     Write-Info "Dest: $Dest"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $iwrParams = @{ Uri = $Url; OutFile = $Dest; UseBasicParsing = $true }
+    # HTTP(S)_PROXY environment variables take precedence over the system proxy
+    $envProxy = Get-EnvProxy
+    if ($envProxy) {
+        $iwrParams.Proxy = $envProxy
+        $iwrParams.ProxyUseDefaultCredentials = $true
+    }
     # PS 5.1's Invoke-WebRequest progress bar slows downloads drastically — disable it
     $prevProgress = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
     try {
-        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
+        Invoke-WebRequest @iwrParams
     } finally {
         $ProgressPreference = $prevProgress
     }
@@ -307,46 +341,62 @@ if (-not $matchedPfid) {
 
 if (-not $SkipDriver) {
 
-    Write-Step "Querying NVIDIA API for latest driver..."
-
     $latestDriverVer     = $null
     $latestDriverDownUrl = $null
 
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # Pre-staged driver installer takes precedence — works on air-gapped networks
+    $offlineDriver = Find-OfflineInstaller "nvidia-driver*.exe"
 
-        $apiUrl = "$NVIDIA_LOOKUP_API" +
-                  "?func=DriverManualLookup" +
-                  "&pfid=$matchedPfid" +
-                  "&osID=$NVIDIA_OS_ID" +
-                  "&dch=1" +
-                  "&upCRD=0" +
-                  "&qnf=0" +
-                  "&ctk=0"
+    if ($offlineDriver) {
+        Write-Step "Using offline driver installer: $offlineDriver"
+    } else {
+        Write-Step "Querying NVIDIA API for latest driver..."
 
-        Write-Info "API: $apiUrl"
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-        $resp    = Invoke-RestMethod -Uri $apiUrl -Method Get -TimeoutSec 30
-        $drvInfo = $resp.IDS | Select-Object -First 1
+            $apiUrl = "$NVIDIA_LOOKUP_API" +
+                      "?func=DriverManualLookup" +
+                      "&pfid=$matchedPfid" +
+                      "&osID=$NVIDIA_OS_ID" +
+                      "&dch=1" +
+                      "&upCRD=0" +
+                      "&qnf=0" +
+                      "&ctk=0"
 
-        if ($drvInfo) {
-            $latestDriverVer     = $drvInfo.downloadInfo.Version
-            $latestDriverDownUrl = $drvInfo.downloadInfo.DownloadURL
+            Write-Info "API: $apiUrl"
 
-            if ($latestDriverDownUrl -notlike "http*") {
-                $latestDriverDownUrl = "https://www.nvidia.com$latestDriverDownUrl"
+            $restParams = @{ Uri = $apiUrl; Method = 'Get'; TimeoutSec = 30 }
+            # HTTP(S)_PROXY environment variables take precedence over the system proxy
+            $envProxy = Get-EnvProxy
+            if ($envProxy) {
+                $restParams.Proxy = $envProxy
+                $restParams.ProxyUseDefaultCredentials = $true
             }
+            $resp    = Invoke-RestMethod @restParams
+            $drvInfo = $resp.IDS | Select-Object -First 1
 
-            Write-Ok "Latest driver version: $latestDriverVer"
-            Write-Info "Download URL: $latestDriverDownUrl"
+            if ($drvInfo) {
+                $latestDriverVer     = $drvInfo.downloadInfo.Version
+                $latestDriverDownUrl = $drvInfo.downloadInfo.DownloadURL
+
+                if ($latestDriverDownUrl -notlike "http*") {
+                    $latestDriverDownUrl = "https://www.nvidia.com$latestDriverDownUrl"
+                }
+
+                Write-Ok "Latest driver version: $latestDriverVer"
+                Write-Info "Download URL: $latestDriverDownUrl"
+            }
+        } catch {
+            Write-Warn "NVIDIA API query failed: $_"
         }
-    } catch {
-        Write-Warn "NVIDIA API query failed: $_"
     }
 
-    if (-not $latestDriverDownUrl) {
+    if (-not $latestDriverDownUrl -and -not $offlineDriver) {
         Write-Warn "Automatic driver URL lookup failed."
-        Write-Warn "Download manually from the NVIDIA website and use -SkipDriver to install CUDA only."
+        Write-Warn "If behind a proxy or air-gapped, download the driver manually and either:"
+        Write-Host "  - place it at $OFFLINE_DIR\nvidia-driver-<version>.exe and re-run, or" -ForegroundColor Cyan
+        Write-Host "  - use -SkipDriver to install CUDA only." -ForegroundColor Cyan
         Write-Host ""
         Write-Host "  https://www.nvidia.com/Download/index.aspx" -ForegroundColor Cyan
         Write-Host ""
@@ -374,23 +424,31 @@ if (-not $SkipDriver) {
     # STEP 6: Download & install driver
     # ─────────────────────────────────────────────────────────
 
-    if ($needDriverInstall -and $latestDriverDownUrl) {
+    if ($needDriverInstall -and ($offlineDriver -or $latestDriverDownUrl)) {
 
-        Write-Step "Downloading driver (several hundred MB, please wait)..."
+        $drvTemp   = $null
+        $drvIsTemp = $false
 
-        $drvFileName = "nvidia-driver-$latestDriverVer.exe"
-        $drvTemp     = Join-Path $env:TEMP $drvFileName
-
-        if (Test-Path $drvTemp) {
-            Write-Warn "Reusing cached installer: $drvTemp"
+        if ($offlineDriver) {
+            $drvTemp = $offlineDriver
         } else {
-            try {
-                Download-File -Url $latestDriverDownUrl -Dest $drvTemp
-                Write-Ok "Download complete: $drvTemp"
-            } catch {
-                Write-Fail "Driver download failed: $_"
-                Write-Warn "Download manually or use -SkipDriver."
-                $drvTemp = $null
+            Write-Step "Downloading driver (several hundred MB, please wait)..."
+
+            $drvFileName = "nvidia-driver-$latestDriverVer.exe"
+            $drvTemp     = Join-Path $env:TEMP $drvFileName
+            $drvIsTemp   = $true
+
+            if (Test-Path $drvTemp) {
+                Write-Warn "Reusing cached installer: $drvTemp"
+            } else {
+                try {
+                    Download-File -Url $latestDriverDownUrl -Dest $drvTemp
+                    Write-Ok "Download complete: $drvTemp"
+                } catch {
+                    Write-Fail "Driver download failed: $_"
+                    Write-Warn "Download manually and place it at $OFFLINE_DIR\nvidia-driver-<version>.exe, or use -SkipDriver."
+                    $drvTemp = $null
+                }
             }
         }
 
@@ -411,7 +469,8 @@ if (-not $SkipDriver) {
                 Write-Info "Log: $env:TEMP\nvidiaDrv*.log"
             }
 
-            Remove-Item $drvTemp -Force -ErrorAction SilentlyContinue
+            # Keep pre-staged offline installers; remove only TEMP downloads
+            if ($drvIsTemp) { Remove-Item $drvTemp -Force -ErrorAction SilentlyContinue }
         }
     }
 }
@@ -457,20 +516,36 @@ if (-not $SkipCuda) {
             Write-Fail "Unsupported CUDA version: $CudaVersion"
         } else {
             $cudaFileName = "cuda_$CudaVersion`_windows.exe"
-            $cudaTemp     = Join-Path $env:TEMP $cudaFileName
+            $cudaTemp     = $null
+            $cudaIsTemp   = $false
 
-            Write-Step "Downloading CUDA Toolkit $CudaVersion (~3 GB, this will take a while)..."
-            Write-Info "URL: $cudaUrl"
+            # Pre-staged CUDA installer takes precedence — works on air-gapped networks
+            $offlineCuda = Find-OfflineInstaller "cuda_$CudaVersion*.exe"
 
-            if (Test-Path $cudaTemp) {
-                Write-Warn "Reusing cached installer: $cudaTemp"
+            if ($offlineCuda) {
+                Write-Step "Using offline CUDA installer: $offlineCuda"
+                $cudaTemp = $offlineCuda
             } else {
-                try {
-                    Download-File -Url $cudaUrl -Dest $cudaTemp
-                    Write-Ok "CUDA download complete: $cudaTemp"
-                } catch {
-                    Write-Fail "CUDA download failed: $_"
-                    $cudaTemp = $null
+                $cudaTemp   = Join-Path $env:TEMP $cudaFileName
+                $cudaIsTemp = $true
+
+                Write-Step "Downloading CUDA Toolkit $CudaVersion (~3 GB, this will take a while)..."
+                Write-Info "URL: $cudaUrl"
+
+                if (Test-Path $cudaTemp) {
+                    Write-Warn "Reusing cached installer: $cudaTemp"
+                } else {
+                    try {
+                        Download-File -Url $cudaUrl -Dest $cudaTemp
+                        Write-Ok "CUDA download complete: $cudaTemp"
+                    } catch {
+                        Write-Fail "CUDA download failed: $_"
+                        Write-Warn "If behind a proxy or air-gapped:"
+                        Write-Host "  1. Download on another PC: $cudaUrl" -ForegroundColor Cyan
+                        Write-Host "  2. Place the file at    : $OFFLINE_DIR\$cudaFileName" -ForegroundColor Cyan
+                        Write-Host "  3. Run install again." -ForegroundColor Cyan
+                        $cudaTemp = $null
+                    }
                 }
             }
 
@@ -497,7 +572,8 @@ if (-not $SkipCuda) {
                     Write-Info "Log: $env:TEMP\cuda_*.log"
                 }
 
-                Remove-Item $cudaTemp -Force -ErrorAction SilentlyContinue
+                # Keep pre-staged offline installers; remove only TEMP downloads
+                if ($cudaIsTemp) { Remove-Item $cudaTemp -Force -ErrorAction SilentlyContinue }
             }
         }
     }

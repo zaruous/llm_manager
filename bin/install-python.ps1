@@ -58,6 +58,50 @@ function Test-Admin {
 }
 
 # ─────────────────────────────────────────────
+# Proxy / offline installer support
+# ─────────────────────────────────────────────
+
+# Pre-staged installers placed here are used without downloading (air-gapped networks)
+$OfflineDir = Join-Path $env:USERPROFILE "llm-services\installers"
+
+# Authenticated corporate proxies (NTLM/Kerberos) return 407 for anonymous
+# requests; attach the Windows logon credentials to the system proxy.
+$defaultProxy = [System.Net.WebRequest]::DefaultWebProxy
+if ($defaultProxy) {
+    $defaultProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+}
+
+function Get-EnvProxy {
+    foreach ($name in @('HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy')) {
+        $v = [Environment]::GetEnvironmentVariable($name)
+        if ($v) { return $v }
+    }
+    return $null
+}
+
+function Invoke-Download {
+    param([string]$Url, [string]$Dest)
+    # Force TLS 1.2 for older Windows compatibility
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $iwrParams = @{ Uri = $Url; OutFile = $Dest; UseBasicParsing = $true }
+    # HTTP(S)_PROXY environment variables take precedence over the system proxy
+    $envProxy = Get-EnvProxy
+    if ($envProxy) {
+        $iwrParams.Proxy = $envProxy
+        $iwrParams.ProxyUseDefaultCredentials = $true
+    }
+    # PS 5.1's Invoke-WebRequest progress bar slows downloads drastically — disable it
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest @iwrParams
+    } finally {
+        $ProgressPreference = $prevProgress
+    }
+    if (-not (Test-Path $Dest)) { throw "file not found after download" }
+}
+
+# ─────────────────────────────────────────────
 # 1. Check if Python is already installed
 # ─────────────────────────────────────────────
 
@@ -143,23 +187,30 @@ if (-not $isAdmin) {
 # 4. Download
 # ─────────────────────────────────────────────
 
-Write-Step "Downloading Python $PythonVersion installer..."
+Write-Step "Locating Python $PythonVersion installer..."
 
-if (Test-Path $tempPath) {
+# Resolution order: offline staging dir -> TEMP cache -> download
+$offlinePath   = Join-Path $OfflineDir $installerName
+$installerPath = $null
+
+if (Test-Path $offlinePath) {
+    Write-Ok "Using offline installer: $offlinePath"
+    $installerPath = $offlinePath
+} elseif (Test-Path $tempPath) {
     Write-Warn "Cached installer found, reusing: $tempPath"
+    $installerPath = $tempPath
 } else {
     try {
-        # Force TLS 1.2 for older Windows compatibility
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-        $wc = New-Object System.Net.WebClient
-        $wc.DownloadFile($downloadUrl, $tempPath)
+        Invoke-Download -Url $downloadUrl -Dest $tempPath
         Write-Ok "Download complete: $tempPath"
+        $installerPath = $tempPath
     } catch {
         Write-Fail "Download failed: $_"
         Write-Host ""
-        Write-Host "Please download manually and re-run:"
-        Write-Host "  $downloadUrl" -ForegroundColor Cyan
+        Write-Host "If this PC is behind a proxy or has no internet access:" -ForegroundColor Yellow
+        Write-Host "  1. Download on another PC: $downloadUrl" -ForegroundColor Cyan
+        Write-Host "  2. Place the file at    : $offlinePath" -ForegroundColor Cyan
+        Write-Host "  3. Run install again." -ForegroundColor Cyan
         exit 1
     }
 }
@@ -184,7 +235,7 @@ $installArgs = @(
 )
 
 try {
-    $proc = Start-Process -FilePath $tempPath -ArgumentList $installArgs -Wait -PassThru
+    $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
     if ($proc.ExitCode -ne 0) {
         Write-Fail "Installation failed (exit code: $($proc.ExitCode))"
         exit $proc.ExitCode
@@ -266,11 +317,16 @@ try {
 # ─────────────────────────────────────────────
 
 Write-Step "Cleaning up temporary files..."
-try {
-    Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
-    Write-Ok "Installer removed: $tempPath"
-} catch {
-    Write-Warn "Failed to remove temp file (non-critical)"
+# Keep pre-staged offline installers; remove only the TEMP download
+if ($installerPath -eq $tempPath) {
+    try {
+        Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
+        Write-Ok "Installer removed: $tempPath"
+    } catch {
+        Write-Warn "Failed to remove temp file (non-critical)"
+    }
+} else {
+    Write-Ok "Offline installer kept: $installerPath"
 }
 
 # ─────────────────────────────────────────────
