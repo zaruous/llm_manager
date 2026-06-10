@@ -54,6 +54,16 @@ public class PluginCommandRunDialog {
     }
 
     public void show() {
+        show(null);
+    }
+
+    /**
+     * 다이얼로그를 열고 지정한 command를 선택 상태로 표시한다.
+     * 플러그인 메뉴의 command 항목에서 바로 진입할 때 사용한다.
+     *
+     * @param preselectCommandId 미리 선택할 command id. null이거나 목록에 없으면 첫 항목 선택
+     */
+    public void show(String preselectCommandId) {
         Stage stage = new Stage();
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
@@ -134,7 +144,16 @@ public class PluginCommandRunDialog {
                 (obs, old, selected) -> renderCommandForm(
                         stage, form, selected, cwdField, promptArea, modelCombo, modeCombo, terminalArea, treeView));
         if (!commands.isEmpty()) {
-            commandList.getSelectionModel().selectFirst();
+            int preselectIndex = 0;
+            if (preselectCommandId != null) {
+                for (int i = 0; i < commands.size(); i++) {
+                    if (preselectCommandId.equals(commands.get(i).command().getId())) {
+                        preselectIndex = i;
+                        break;
+                    }
+                }
+            }
+            commandList.getSelectionModel().select(preselectIndex);
         } else {
             form.getChildren().setAll(new Label("실행 가능한 플러그인 command가 없습니다."));
             runBtn.setDisable(true);

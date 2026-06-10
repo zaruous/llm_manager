@@ -7,7 +7,10 @@ package org.kyj.llmmanager.ui.controller;
 import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.*;
 import org.kyj.llmmanager.service.InstallationService;
+import org.kyj.llmmanager.service.PluginManager;
 import org.kyj.llmmanager.service.SystemMonitorService;
+import org.kyj.llmmanager.setup.SetupCheckDialog;
+import org.kyj.llmmanager.util.PlatformUtil;
 import org.kyj.llmmanager.ui.cell.ServiceListCell;
 import org.kyj.llmmanager.ui.dialog.ServiceDetailDialog;
 import org.kyj.llmmanager.util.CommandBuilder;
@@ -16,6 +19,7 @@ import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.util.Duration;
 import org.kyj.llmmanager.ui.dialog.AddServiceDialog;
+import org.kyj.llmmanager.ui.dialog.CursorAgentDialog;
 import org.kyj.llmmanager.ui.dialog.HelpDialog;
 import org.kyj.llmmanager.ui.dialog.PluginCommandRunDialog;
 import org.kyj.llmmanager.ui.dialog.PluginManagerDialog;
@@ -47,6 +51,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -65,6 +70,12 @@ public class MainController implements Initializable {
     // ---- Menu bar ----
     /** 메뉴바 (Stage 참조 획득에 사용) */
     @FXML private MenuBar menuBar;
+
+    /** 플러그인 메뉴. 플러그인별 command 서브메뉴를 동적으로 구성한다. */
+    @FXML private Menu pluginMenu;
+
+    /** 플러그인 메뉴의 고정 항목(실행·관리). 동적 재구성 시에도 하단에 유지된다. */
+    private List<MenuItem> pluginMenuStaticItems;
 
     // ---- Left panel ----
     /** 좌측 패널: 검색 필드 */
@@ -235,6 +246,11 @@ public class MainController implements Initializable {
         this.ctx = ctx;
         loadServices();
         showDashboard();
+
+        // 플러그인 메뉴 동적 구성 — 메뉴를 열 때마다 재구성해 '플러그인 관리'의 새로고침을 반영
+        pluginMenuStaticItems = new ArrayList<>(pluginMenu.getItems());
+        pluginMenu.setOnShowing(e -> rebuildPluginMenu());
+        rebuildPluginMenu();
 
         // 시스템 리소스 UI 타이머 — 2초마다 최신 수집값을 화면에 반영
         systemStatsTimer = new Timeline(
@@ -950,6 +966,19 @@ public class MainController implements Initializable {
         new SettingsDialog((Stage) menuBar.getScene().getWindow()).showAndWait();
     }
 
+    /**
+     * 환경 체크리스트 다이얼로그를 열어 필요 라이브러리 설치 상태 확인·설치를 수행한다.
+     * 설치 스크립트가 PowerShell 기반이라 Windows 외 OS에서는 안내만 표시한다.
+     */
+    @FXML
+    private void onSetupCheck() {
+        if (!PlatformUtil.isWindows()) {
+            new Alert(Alert.AlertType.INFORMATION, "필요 라이브러리 설치는 Windows에서만 지원됩니다.").showAndWait();
+            return;
+        }
+        new SetupCheckDialog().showAndWait();
+    }
+
     @FXML
     private void onPlugins() {
         new PluginManagerDialog((Stage) menuBar.getScene().getWindow()).show();
@@ -958,6 +987,60 @@ public class MainController implements Initializable {
     @FXML
     private void onRunPluginCommand() {
         new PluginCommandRunDialog((Stage) menuBar.getScene().getWindow()).show();
+    }
+
+    /**
+     * 플러그인 메뉴를 현재 로드된 플러그인 command로 재구성한다.
+     * 플러그인이 하나면 command를 메뉴에 바로 나열하고,
+     * 둘 이상이면 플러그인별 서브메뉴로 묶는다. 고정 항목(실행·관리)은 항상 하단에 유지.
+     */
+    private void rebuildPluginMenu() {
+        List<PluginManager.PluginCommandContribution> commands =
+                ctx != null && ctx.getPluginManager() != null
+                        ? ctx.getPluginManager().getCommands() : List.of();
+
+        // getCommands()가 플러그인명 순으로 정렬해 반환하므로 LinkedHashMap으로 순서 유지
+        Map<String, List<PluginManager.PluginCommandContribution>> byPlugin = new LinkedHashMap<>();
+        for (PluginManager.PluginCommandContribution c : commands) {
+            byPlugin.computeIfAbsent(c.pluginName(), k -> new ArrayList<>()).add(c);
+        }
+
+        List<MenuItem> items = new ArrayList<>();
+        if (byPlugin.size() == 1) {
+            for (PluginManager.PluginCommandContribution c : commands) {
+                items.add(pluginCommandMenuItem(c));
+            }
+        } else {
+            for (Map.Entry<String, List<PluginManager.PluginCommandContribution>> e : byPlugin.entrySet()) {
+                Menu sub = new Menu(e.getKey());
+                for (PluginManager.PluginCommandContribution c : e.getValue()) {
+                    sub.getItems().add(pluginCommandMenuItem(c));
+                }
+                items.add(sub);
+            }
+        }
+        if (!items.isEmpty()) items.add(new SeparatorMenuItem());
+        items.addAll(pluginMenuStaticItems);
+        pluginMenu.getItems().setAll(items);
+    }
+
+    /**
+     * 플러그인 command 하나를 실행 다이얼로그(해당 command 선택 상태)로 여는 메뉴 항목을 만든다.
+     *
+     * @param c 메뉴 항목으로 만들 command 기여 정보
+     * @return command 제목을 라벨로 갖는 메뉴 항목
+     */
+    private MenuItem pluginCommandMenuItem(PluginManager.PluginCommandContribution c) {
+        MenuItem item = new MenuItem(c.command().getTitle());
+        // Cursor Agent는 전용 CLI 세션 UX(디렉토리 선택 → 대화 화면)로 실행
+        if ("cursor.runAgent".equals(c.command().getId())) {
+            item.setOnAction(e -> new CursorAgentDialog(
+                    (Stage) menuBar.getScene().getWindow(), c).show());
+        } else {
+            item.setOnAction(e -> new PluginCommandRunDialog((Stage) menuBar.getScene().getWindow())
+                    .show(c.command().getId()));
+        }
+        return item;
     }
 
     /**

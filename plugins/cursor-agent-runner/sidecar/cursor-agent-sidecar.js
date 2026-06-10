@@ -72,11 +72,36 @@ async function main() {
   let finalStatus = "";
   let finalText = "";
   let finalOk = true;
-  const agent = await Agent.create({
+  const agentOptions = {
     apiKey: process.env.CURSOR_API_KEY,
     model: { id: request.model || "composer-2" },
     local: { cwd: request.cwd },
-  });
+  };
+  // 프로젝트(.cursor/rules 등)·사용자 레이어 규칙 로드 범위
+  if (Array.isArray(request.settingSources) && request.settingSources.length > 0) {
+    agentOptions.local.settingSources = request.settingSources;
+  }
+  // 커스텀 서브에이전트 정의 (이름 → {description, prompt})
+  if (request.agents && typeof request.agents === "object") {
+    const names = Object.keys(request.agents);
+    if (names.length > 0) {
+      agentOptions.agents = {};
+      for (const name of names) {
+        const def = request.agents[name] || {};
+        agentOptions.agents[name] = {
+          description: def.description || name,
+          prompt: def.prompt || "",
+          model: "inherit",
+        };
+      }
+      writeLine("status", "커스텀 agent 로드: " + names.join(", "));
+    }
+  }
+  // 대화 모드 (agent | plan)
+  if (request.agentMode === "plan" || request.agentMode === "agent") {
+    agentOptions.mode = request.agentMode;
+  }
+  const agent = await Agent.create(agentOptions);
 
   try {
     writeLine("status", "Cursor Agent 시작");

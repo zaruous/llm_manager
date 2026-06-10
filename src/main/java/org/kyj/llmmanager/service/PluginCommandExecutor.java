@@ -112,12 +112,20 @@ public class PluginCommandExecutor {
         }
 
         try {
-            String payload = mapper.writeValueAsString(Map.of(
-                    "commandId", command.getId(),
-                    "cwd", request.cwd(),
-                    "prompt", request.prompt() != null ? request.prompt() : "",
-                    "model", request.model() != null ? request.model() : "",
-                    "mode", request.mode() != null ? request.mode() : "sdk"));
+            Map<String, Object> payloadMap = new LinkedHashMap<>();
+            payloadMap.put("commandId", command.getId());
+            payloadMap.put("cwd", request.cwd());
+            payloadMap.put("prompt", request.prompt() != null ? request.prompt() : "");
+            payloadMap.put("model", request.model() != null ? request.model() : "");
+            payloadMap.put("mode", request.mode() != null ? request.mode() : "sdk");
+            if (request.agentMode() != null) payloadMap.put("agentMode", request.agentMode());
+            if (request.settingSources() != null && !request.settingSources().isEmpty()) {
+                payloadMap.put("settingSources", request.settingSources());
+            }
+            if (request.agents() != null && !request.agents().isEmpty()) {
+                payloadMap.put("agents", request.agents());
+            }
+            String payload = mapper.writeValueAsString(payloadMap);
             String encoded = Base64.getEncoder()
                     .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
 
@@ -188,7 +196,8 @@ public class PluginCommandExecutor {
             String message = node.path("message").asText("");
             if ("done".equals(type)) return finalText(message);
             if ("error".equals(type)) return message;
-            if ("status".equals(type)) return "";
+            // 진행 상태도 CLI처럼 노출 — 빈 메시지만 숨긴다
+            if ("status".equals(type)) return message.isBlank() ? "" : "· " + message;
             return "";
         } catch (Exception e) {
             return line != null ? line : "";
@@ -255,10 +264,22 @@ public class PluginCommandExecutor {
             String prompt,
             String model,
             String mode,
-            Map<String, String> options
+            Map<String, String> options,
+            /** Cursor 대화 모드 (agent | plan). null이면 SDK 기본값. */
+            String agentMode,
+            /** SDK가 로드할 설정 레이어 (project, user 등). null이면 SDK 기본값. */
+            List<String> settingSources,
+            /** 커스텀 서브에이전트 정의: 이름 → {description, prompt}. */
+            Map<String, Map<String, String>> agents
     ) {
         public PluginCommandRequest {
             options = options != null ? options : new LinkedHashMap<>();
+        }
+
+        /** 확장 옵션 없이 생성하는 기존 호환 생성자. */
+        public PluginCommandRequest(String cwd, String prompt, String model, String mode,
+                                    Map<String, String> options) {
+            this(cwd, prompt, model, mode, options, null, null, null);
         }
     }
 

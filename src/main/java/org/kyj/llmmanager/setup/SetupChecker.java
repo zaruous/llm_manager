@@ -56,6 +56,7 @@ public class SetupChecker {
             case PYTHON        -> checkPython();
             case NVIDIA_DRIVER -> checkNvidiaDriver();
             case CUDA          -> checkCuda();
+            case NODEJS        -> checkNodeJs();
         };
     }
 
@@ -185,6 +186,40 @@ public class SetupChecker {
             }
         }
         return false;
+    }
+
+    /** Cursor 플러그인 sidecar(@cursor/sdk)가 요구하는 Node.js 최소 메이저 버전 */
+    private static final int MIN_NODE_MAJOR = 22;
+
+    /**
+     * node --version의 메이저 버전이 22 이상인지 확인한다.
+     * PATH에 없으면 MSI 기본 설치 경로(Program Files\nodejs)를 직접 탐색해
+     * 설치 직후 PATH 미반영 케이스를 처리한다.
+     */
+    private boolean checkNodeJs() {
+        if (isNodeVersionOk(List.of("node", "--version"))) return true;
+
+        if (PlatformUtil.isWindows()) {
+            Path exe = Path.of(
+                    System.getenv().getOrDefault("ProgramFiles", "C:\\Program Files"),
+                    "nodejs", "node.exe");
+            if (Files.isExecutable(exe) && isNodeVersionOk(List.of(exe.toString(), "--version"))) {
+                log.info("[setup] node found at {}", exe);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 명령 출력("v22.14.0" 형식)에서 메이저 버전을 파싱해 최소 요구 버전을 검사한다.
+     * Node가 있어도 구버전이면 false — sidecar가 22 미만에서 실행을 거부한다.
+     */
+    private boolean isNodeVersionOk(List<String> command) {
+        String out = runCommandCapture("Node.js", command);
+        if (out == null) return false;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("v(\\d+)").matcher(out);
+        return m.find() && Integer.parseInt(m.group(1)) >= MIN_NODE_MAJOR;
     }
 
     // ─────────────────────────────────────────────

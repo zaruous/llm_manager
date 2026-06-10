@@ -12,6 +12,14 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
+// 소스 파일은 UTF-8 — 한글 주석이 시스템 기본 인코딩(MS949)으로 깨지는 것 방지
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+tasks.withType(Javadoc).configureEach {
+    options.encoding = 'UTF-8'
+}
+
 repositories {
     mavenCentral()
 }

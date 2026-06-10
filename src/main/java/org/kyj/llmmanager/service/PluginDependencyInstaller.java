@@ -104,6 +104,13 @@ public class PluginDependencyInstaller {
         boolean hasNpm = !plugin.getManifest().getInstall().getNpmPackages().isEmpty()
                 || Files.isRegularFile(pluginDir.resolve("package.json"));
         if (hasNpm) {
+            // node/npm 가용성 먼저 확인 — 미설치 시 'npm is not recognized' 대신 안내 메시지
+            if (!runSilent("node --version") || !runSilent("npm --version")) {
+                cb.onLog("[오류] Node.js(npm)가 PATH에 없습니다.");
+                cb.onLog("메뉴 [설정 > 필요 라이브러리 설치]에서 Node.js를 설치한 뒤 다시 시도하세요.");
+                cb.onDone(false);
+                return;
+            }
             success = runInstallCommand(npmInstallCommand(plugin), isGlobalInstall(plugin) ? null : pluginDir, cb);
         }
 

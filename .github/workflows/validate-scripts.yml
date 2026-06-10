@@ -4,6 +4,7 @@
 # 러너 환경 특성으로 검증 가능한 경로:
 #   - install-python.ps1        : 러너에 Python 프리인스톨 → '이미 설치됨' 경로 (exit 0)
 #   - install-nvidia-driver.ps1 : 러너에 NVIDIA GPU 없음 → GPU 감지 실패 경로 (exit 1)
+#   - install-nodejs.ps1        : setup-node로 Node 22 준비 → '이미 설치됨' 경로 (exit 0)
 name: Validate Install Scripts
 
 on:
@@ -24,7 +25,7 @@ jobs:
         shell: powershell
         run: |
           $failed = $false
-          foreach ($f in @("bin/install-python.ps1", "bin/install-nvidia-driver.ps1")) {
+          foreach ($f in @("bin/install-python.ps1", "bin/install-nvidia-driver.ps1", "bin/install-nodejs.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) {
@@ -87,6 +88,18 @@ jobs:
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File bin\install-python.ps1
+          if ($LASTEXITCODE -ne 0) { Write-Error "expected exit 0, got $LASTEXITCODE"; exit 1 }
+          Write-Host "OK: already-installed path exited 0"
+
+      - name: Setup Node.js 22 (for install-nodejs.ps1 already-installed path)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run install-nodejs.ps1 (already-installed path, expect exit 0)
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File bin\install-nodejs.ps1
           if ($LASTEXITCODE -ne 0) { Write-Error "expected exit 0, got $LASTEXITCODE"; exit 1 }
           Write-Host "OK: already-installed path exited 0"
 

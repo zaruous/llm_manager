@@ -30,6 +30,13 @@ public enum SetupItem {
             "PyTorch GPU 연산 라이브러리입니다. CPU 전용이면 건너뜀 가능.",
             false,
             "bin/install-nvidia-driver.ps1"
+    ),
+
+    NODEJS(
+            "Node.js 22+",
+            "Cursor 플러그인(@cursor/sdk sidecar) 실행에 필요한 런타임입니다. 플러그인 미사용 시 건너뜀 가능.",
+            false,
+            "bin/install-nodejs.ps1"
     );
 
     /** UI에 표시할 항목 이름 */
