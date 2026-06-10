@@ -60,29 +60,15 @@ public class SetupCheckDialog {
 
     private final SetupChecker checker;
 
-    /** 사전 검사 결과. null이 아니면 최초 검사를 생략하고 이 결과를 그대로 반영한다. */
-    private Map<SetupItem, Boolean> initialResults;
-
     public SetupCheckDialog() {
         this.checker = new SetupChecker();
     }
 
-    /** 테스트 전용 생성자 — 항목별 결과를 미리 지정한 checker를 주입한다. */
+    /** 기동 사전 검사·테스트에서 결과를 지정한 checker를 재사용하는 생성자. */
     public SetupCheckDialog(SetupChecker checker) {
         this.checker = checker;
     }
 
-    /**
-     * 사전 검사 결과를 시드해 중복 검사 없이 다이얼로그를 표시하는 생성자.
-     * 설치 후 재검사는 주입된 checker로 정상 수행한다.
-     *
-     * @param checker        설치 후 재검사에 사용할 체커
-     * @param initialResults checkAll()로 얻은 항목별 사전 검사 결과
-     */
-    public SetupCheckDialog(SetupChecker checker, Map<SetupItem, Boolean> initialResults) {
-        this.checker = checker;
-        this.initialResults = initialResults;
-    }
     /** 설치 스크립트가 실행 중인지 추적 — 중복 실행 방지 */
     private final AtomicBoolean installing = new AtomicBoolean(false);
 
@@ -245,18 +231,6 @@ public class SetupCheckDialog {
      * 검사 중 UI 블로킹을 막기 위해 별도 스레드에서 실행한다.
      */
     private void runAllChecks() {
-        // 사전 검사 결과가 시드됐으면 재검사 없이 그대로 반영 (앱 기동 시 중복 검사 방지)
-        if (initialResults != null) {
-            Map<SetupItem, Boolean> seed = initialResults;
-            initialResults = null;
-            for (SetupItem item : SetupItem.values()) {
-                boolean ok = Boolean.TRUE.equals(seed.get(item));
-                results.put(item, ok);
-                setStatus(item, ok ? CheckStatus.OK : CheckStatus.FAIL);
-            }
-            Platform.runLater(this::refreshContinueButton);
-            return;
-        }
         new Thread(() -> {
             for (SetupItem item : SetupItem.values()) {
                 setStatus(item, CheckStatus.CHECKING);
@@ -425,19 +399,19 @@ public class SetupCheckDialog {
      * @return 건너뛰어도 되면 true
      */
     private boolean confirmSkipIfNeeded() {
-        boolean requiredFailed = false;
+        List<String> failedRequired = new java.util.ArrayList<>();
         for (SetupItem item : SetupItem.values()) {
             if (item.isRequired() && Boolean.FALSE.equals(results.get(item))) {
-                requiredFailed = true;
-                break;
+                failedRequired.add(item.getDisplayName());
             }
         }
-        if (!requiredFailed) return true;
+        if (failedRequired.isEmpty()) return true;
 
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("환경 설정 건너뜀");
         alert.setHeaderText("필수 항목이 아직 설치되지 않았습니다.");
-        alert.setContentText("Python 3 없이 진행하면 BGE-M3 서버를 실행할 수 없습니다.\n그래도 건너뛸까요?");
+        alert.setContentText("미설치 필수 항목: " + String.join(", ", failedRequired)
+                + "\n해당 기능은 설치 전까지 동작하지 않습니다. 그래도 건너뛸까요?");
         return alert.showAndWait().filter(b -> b == ButtonType.OK).isPresent();
     }
 

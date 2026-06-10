@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kyj.llmmanager.model.plugin.PluginCommand;
 import org.kyj.llmmanager.model.plugin.LoadedPlugin;
 import org.kyj.llmmanager.model.AppSettings;
+import org.kyj.llmmanager.util.ToolLocator;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -68,6 +69,24 @@ public class PluginCommandExecutor {
     public PluginCommandResult executeStreaming(String pluginId, PluginCommand command,
                                                 PluginCommandRequest request,
                                                 Consumer<String> onOutput) {
+        return executeStreaming(pluginId, command, request, onOutput, null);
+    }
+
+    /**
+     * 플러그인 command를 실행하고 stdout 이벤트를 라인 단위로 전달한다.
+     * 시작된 sidecar Process를 콜백으로 노출해 호출자가 실행 취소(강제 종료)를 할 수 있다.
+     *
+     * @param pluginId command를 제공한 플러그인 ID
+     * @param command 실행할 command manifest
+     * @param request 실행 입력값
+     * @param onOutput 사용자에게 표시할 streaming 출력 콜백
+     * @param onProcessStart sidecar 프로세스 시작 직후 호출되는 콜백 (null 허용)
+     * @return 최종 실행 결과
+     */
+    public PluginCommandResult executeStreaming(String pluginId, PluginCommand command,
+                                                PluginCommandRequest request,
+                                                Consumer<String> onOutput,
+                                                Consumer<Process> onProcessStart) {
         if (command == null || command.getId() == null || command.getId().isBlank()) {
             return PluginCommandResult.error("실행할 command가 없습니다.");
         }
@@ -89,7 +108,7 @@ public class PluginCommandExecutor {
         }
 
         if ("cursor.runAgent".equals(command.getId())) {
-            return runCursorSidecar(pluginId, command, request, onOutput);
+            return runCursorSidecar(pluginId, command, request, onOutput, onProcessStart);
         }
 
         return PluginCommandResult.error("등록되지 않은 command handler입니다: " + command.getId());
@@ -97,7 +116,8 @@ public class PluginCommandExecutor {
 
     private PluginCommandResult runCursorSidecar(String pluginId, PluginCommand command,
                                                  PluginCommandRequest request,
-                                                 Consumer<String> onOutput) {
+                                                 Consumer<String> onOutput,
+                                                 Consumer<Process> onProcessStart) {
         LoadedPlugin plugin = pluginManager.findPlugin(pluginId);
         if (plugin == null) {
             return PluginCommandResult.error("플러그인 디렉토리를 찾을 수 없습니다: " + pluginId);
@@ -132,13 +152,22 @@ public class PluginCommandExecutor {
             AppSettings settings = settingsRepository.get();
             String nodeCommand = settings.getNodeCommand() == null || settings.getNodeCommand().isBlank()
                     ? "node" : settings.getNodeCommand().trim();
+            // 직접 exec는 부모 PATH로 명령을 찾으므로, 기본값 "node"는 ToolLocator로 해석 —
+            // 설치 직후 PATH 미반영 상태에서도 알려진 설치 경로의 node를 사용한다
+            if ("node".equals(nodeCommand)) {
+                String resolved = ToolLocator.resolveCommand("node");
+                if (resolved != null) nodeCommand = resolved;
+            }
             ProcessBuilder pb = new ProcessBuilder(nodeCommand, sidecar.toString(), encoded);
             pb.directory(Path.of(request.cwd()).toFile());
             pb.redirectErrorStream(false);
             applyAllowedEnvironment(pb.environment(), command.getRequires().getEnv());
+            // sidecar가 하위 프로세스에서 node/npm을 다시 찾는 경우 대비
+            ToolLocator.augmentPath(pb.environment());
             pb.environment().put("LLM_MANAGER_STREAM", "1");
 
             Process process = pb.start();
+            if (onProcessStart != null) onProcessStart.accept(process);
             StringBuilder stdout = new StringBuilder();
             CompletableFuture<Void> stdoutFuture = readStdoutStreaming(process, stdout, onOutput);
             CompletableFuture<String> stderrFuture = readStreamAsync(process.getErrorStream());

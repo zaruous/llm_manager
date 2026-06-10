@@ -56,15 +56,23 @@ public class LlmManagerApp extends Application {
         SceneFactory.init(cssUrl("app.css"));
 
         // 환경 체크 — 설치 스크립트가 PowerShell 기반이라 Windows에서만 수행.
-        // 모든 항목이 이미 설치돼 있으면 다이얼로그를 띄우지 않는다.
+        // 기동 시에는 required 항목만 검사하고 미통과 시에만 다이얼로그를 띄운다.
+        // Python 등 런타임 항목은 해당 서비스의 설치/시작 시점에 검사한다 —
+        // 선택 항목까지 여기서 검사하면 FX 스레드가 프로세스 실행으로 블로킹된다.
         if (PlatformUtil.isWindows()) {
             SetupChecker checker = new SetupChecker();
-            java.util.Map<SetupItem, Boolean> results = checker.checkAll();
-            if (results.containsValue(false)) {
-                // '계속' 또는 '건너뜀' 클릭 시 반환 — 사전 검사 결과를 시드해 중복 검사 방지
-                new SetupCheckDialog(checker, results).showAndWait();
+            boolean requiredMissing = false;
+            for (SetupItem item : SetupItem.values()) {
+                if (item.isRequired() && !checker.check(item)) {
+                    requiredMissing = true;
+                    break;
+                }
+            }
+            if (requiredMissing) {
+                // '계속' 또는 '건너뜀' 클릭 시 반환
+                new SetupCheckDialog(checker).showAndWait();
             } else {
-                log.info("[setup] 모든 환경 항목 통과 — 환경 체크 다이얼로그 생략");
+                log.info("[setup] 필수 환경 항목 통과 — 환경 체크 다이얼로그 생략");
             }
         }
 

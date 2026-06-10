@@ -96,6 +96,15 @@ public class CursorAgentDialog {
     /** 실행 중 중복 전송 방지. */
     private final AtomicBoolean running = new AtomicBoolean(false);
 
+    /** 실행 중인 sidecar 프로세스. null이면 미실행. 취소 시 강제 종료 대상. */
+    private volatile Process sidecarProcess;
+
+    /** 사용자가 중지를 눌렀는지 여부. true면 실패 결과를 오류 대신 '중단됨'으로 표시. */
+    private volatile boolean cancelRequested;
+
+    /** 실행 중에만 활성화되는 중지 버튼. */
+    private Button stopBtn;
+
     /** 세션 시작 시 확정된 작업 디렉토리·모델. */
     private String sessionCwd;
     private String sessionModel;
@@ -136,6 +145,9 @@ public class CursorAgentDialog {
 
         root = new BorderPane();
         root.setCenter(buildStartPane());
+
+        // 창을 닫으면 실행 중인 sidecar도 함께 종료 — 백그라운드 프로세스 잔류 방지
+        stage.setOnCloseRequest(e -> cancelRunningSession());
 
         stage.setScene(SceneFactory.create(root, 860, 640));
         stage.setResizable(true);
@@ -431,10 +443,18 @@ public class CursorAgentDialog {
         sendBtn = new Button("전송");
         sendBtn.setPrefWidth(80);
         sendBtn.setOnAction(e -> sendPrompt());
+        stopBtn = new Button("중지");
+        stopBtn.setPrefWidth(80);
+        stopBtn.setDisable(true);
+        stopBtn.setOnAction(e -> cancelRunningSession());
         Button closeBtn = new Button("닫기");
         closeBtn.setPrefWidth(80);
-        closeBtn.setOnAction(e -> stage.close());
-        VBox sideButtons = new VBox(8, sendBtn, closeBtn);
+        // stage.close()는 onCloseRequest를 호출하지 않으므로 실행 중인 sidecar를 직접 정리
+        closeBtn.setOnAction(e -> {
+            cancelRunningSession();
+            stage.close();
+        });
+        VBox sideButtons = new VBox(8, sendBtn, stopBtn, closeBtn);
         sideButtons.setAlignment(Pos.TOP_CENTER);
 
         HBox inputRow = new HBox(10, promptArea, sideButtons, runningIndicator);
@@ -470,6 +490,7 @@ public class CursorAgentDialog {
 
         promptArea.clear();
         setRunningUi(true);
+        cancelRequested = false;
         appendLine("❯ " + prompt);
 
         var ctx = AppContext.getInstance();
@@ -480,11 +501,19 @@ public class CursorAgentDialog {
                     new PluginCommandRequest(sessionCwd, prompt, sessionModel, "sdk",
                             new LinkedHashMap<>(), sessionAgentMode, SETTING_SOURCES,
                             new LinkedHashMap<>(loadedAgents)),
-                    message -> Platform.runLater(() -> appendLine(message)));
+                    message -> Platform.runLater(() -> appendLine(message)),
+                    process -> {
+                        sidecarProcess = process;
+                        // 프로세스 시작 직전에 중지를 눌렀으면 즉시 종료
+                        if (cancelRequested) destroyProcessTree(process);
+                    });
+            sidecarProcess = null;
             Platform.runLater(() -> {
-                // 스트림에 이미 찍힌 메시지면 중복 출력하지 않는다
-                if (!result.success() && (terminalArea.getText() == null
+                if (cancelRequested) {
+                    appendLine("[중단됨] 사용자가 실행을 취소했습니다.");
+                } else if (!result.success() && (terminalArea.getText() == null
                         || !terminalArea.getText().contains(result.message()))) {
+                    // 스트림에 이미 찍힌 메시지면 중복 출력하지 않는다
                     appendLine("[오류] " + result.message());
                 }
                 appendLine("");
@@ -493,6 +522,23 @@ public class CursorAgentDialog {
                 promptArea.requestFocus();
             });
         }, "cursor-agent-session").start();
+    }
+
+    /**
+     * 실행 중인 sidecar 프로세스를 강제 종료한다. 미실행이면 아무것도 하지 않는다.
+     * 중지 버튼·창 닫기에서 호출되며, 결과 처리는 sendPrompt의 완료 콜백이 담당한다.
+     */
+    private void cancelRunningSession() {
+        if (!running.get()) return;
+        cancelRequested = true;
+        Process process = sidecarProcess;
+        if (process != null) destroyProcessTree(process);
+    }
+
+    /** sidecar(node)가 만든 자식 프로세스까지 포함해 프로세스 트리를 강제 종료한다. */
+    private void destroyProcessTree(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
     }
 
     /**
@@ -943,6 +989,7 @@ public class CursorAgentDialog {
 
     private void setRunningUi(boolean active) {
         sendBtn.setDisable(active);
+        stopBtn.setDisable(!active);
         runningIndicator.setVisible(active);
     }
 
