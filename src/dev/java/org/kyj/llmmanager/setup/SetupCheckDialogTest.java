@@ -3,13 +3,14 @@
  * 작성일 : 2026-06-09
  *
  * 개발용 단독 실행 런처 — 앱 전체를 띄우지 않고 SetupCheckDialog 만 테스트한다.
+ * dev 소스셋에 있어 배포 JAR에는 포함되지 않는다.
  *
  * 실행:
- *   ./gradlew run --args="--setup-test"          (모든 항목 실제 검사)
- *   ./gradlew run --args="--setup-test=fail-all" (모든 항목 강제 실패)
- *   ./gradlew run --args="--setup-test=fail-python"
- *   ./gradlew run --args="--setup-test=fail-nvidia"
- *   ./gradlew run --args="--setup-test=fail-cuda"
+ *   ./gradlew runSetupTest                        (모든 항목 실제 검사)
+ *   ./gradlew runSetupTest --args="fail-all"      (모든 항목 강제 실패)
+ *   ./gradlew runSetupTest --args="fail-python"
+ *   ./gradlew runSetupTest --args="fail-nvidia"
+ *   ./gradlew runSetupTest --args="fail-cuda"
  */
 package org.kyj.llmmanager.setup;
 
