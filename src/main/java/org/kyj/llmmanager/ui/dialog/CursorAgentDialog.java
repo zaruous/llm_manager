@@ -14,6 +14,7 @@ import org.kyj.llmmanager.service.PluginDependencyInstaller;
 import org.kyj.llmmanager.service.PluginManager.PluginCommandContribution;
 import org.kyj.llmmanager.util.SceneFactory;
 
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
@@ -37,6 +38,7 @@ import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -93,6 +95,12 @@ public class CursorAgentDialog {
     /** 자동완성 대상 토큰의 시작 인덱스('/'·'@' 문자 위치). 적용 시 이 위치부터 치환. */
     private int suggestTokenStart = -1;
 
+    /**
+     * 자동완성 갱신 디바운스. text·caret 리스너가 키 입력당 2회 발화하고
+     * 갱신마다 FX 스레드에서 디렉토리 I/O가 일어나므로 150ms로 묶는다.
+     */
+    private PauseTransition suggestDebounce;
+
     /** 실행 중 중복 전송 방지. */
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -128,6 +136,7 @@ public class CursorAgentDialog {
             new Suggestion("/mode",  "대화 모드 변경 (agent | plan)",              "/mode ",  false),
             new Suggestion("/skill", "현재 디렉토리 스킬·규칙 확인 및 팩 설치",      "/skill ", false),
             new Suggestion("/agent", "커스텀 agent 로드 (.cursor/agents/*.md)",    "/agent ", false),
+            new Suggestion("/save",  "터미널 출력을 로그 파일로 저장",               "/save",   false),
             new Suggestion("/clear", "터미널 출력 지우기",                          "/clear",  false),
             new Suggestion("/cwd",   "작업 디렉토리 다시 선택",                     "/cwd",    false));
 
@@ -146,8 +155,11 @@ public class CursorAgentDialog {
         root = new BorderPane();
         root.setCenter(buildStartPane());
 
-        // 창을 닫으면 실행 중인 sidecar도 함께 종료 — 백그라운드 프로세스 잔류 방지
-        stage.setOnCloseRequest(e -> cancelRunningSession());
+        // 창을 닫으면 실행 중인 sidecar도 함께 종료하고 세션 로그를 보존
+        stage.setOnCloseRequest(e -> {
+            cancelRunningSession();
+            saveSessionLog();
+        });
 
         stage.setScene(SceneFactory.create(root, 860, 640));
         stage.setResizable(true);
@@ -310,7 +322,13 @@ public class CursorAgentDialog {
     /** 입력된 경로가 실제 디렉토리인지 검사해 상태 라벨·시작 버튼을 갱신한다. */
     private void validateCwd() {
         String value = cwdField.getText() == null ? "" : cwdField.getText().trim();
-        boolean valid = !value.isBlank() && Files.isDirectory(Path.of(value));
+        boolean valid;
+        try {
+            valid = !value.isBlank() && Files.isDirectory(Path.of(value));
+        } catch (InvalidPathException e) {
+            // Windows 금지 문자(| " < 등) 입력 중 — 예외 대신 잘못된 경로로 처리
+            valid = false;
+        }
         // 디렉토리 유효 + SDK 의존성 충족 시에만 세션 시작 가능
         startBtn.setDisable(!valid || !depsReady);
         if (value.isBlank()) {
@@ -344,9 +362,11 @@ public class CursorAgentDialog {
         sessionCwd = Path.of(cwdField.getText().trim()).toAbsolutePath().normalize().toString();
         sessionModel = modelCombo.getValue() != null ? modelCombo.getValue() : "auto";
 
-        // 다음 실행을 위해 마지막 선택을 기본값으로 저장
+        // 다음 실행을 위해 마지막 선택을 기본값으로 저장 — 대화 모드는 저장값에서 복원
         var repo = AppContext.getInstance().getAppSettingsRepository();
         var settings = repo.get();
+        sessionAgentMode = settings.getPluginSetting(
+                contribution.pluginId(), "cursor.defaultMode", "agent");
         settings.setPluginSetting(contribution.pluginId(), "cursor.defaultCwd", sessionCwd);
         settings.setPluginSetting(contribution.pluginId(), "cursor.defaultModel", sessionModel);
         repo.save(settings);
@@ -394,9 +414,11 @@ public class CursorAgentDialog {
         promptArea.setPrefRowCount(3);
         promptArea.setWrapText(true);
         initSuggestList();
-        // 입력·커서 이동마다 자동완성 후보 갱신
-        promptArea.textProperty().addListener((obs, old, v) -> updateSuggestions());
-        promptArea.caretPositionProperty().addListener((obs, old, v) -> updateSuggestions());
+        // 입력·커서 이동마다 자동완성 후보 갱신 — 디바운스로 묶어 I/O 빈도를 줄인다
+        suggestDebounce = new PauseTransition(Duration.millis(150));
+        suggestDebounce.setOnFinished(e -> updateSuggestions());
+        promptArea.textProperty().addListener((obs, old, v) -> suggestDebounce.playFromStart());
+        promptArea.caretPositionProperty().addListener((obs, old, v) -> suggestDebounce.playFromStart());
         promptArea.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             // 자동완성 패널이 열려 있으면 방향키·Enter·Tab은 자동완성 조작에 사용
             if (suggestList.isVisible()) {
@@ -449,9 +471,10 @@ public class CursorAgentDialog {
         stopBtn.setOnAction(e -> cancelRunningSession());
         Button closeBtn = new Button("닫기");
         closeBtn.setPrefWidth(80);
-        // stage.close()는 onCloseRequest를 호출하지 않으므로 실행 중인 sidecar를 직접 정리
+        // stage.close()는 onCloseRequest를 호출하지 않으므로 sidecar 정리·로그 보존을 직접 수행
         closeBtn.setOnAction(e -> {
             cancelRunningSession();
+            saveSessionLog();
             stage.close();
         });
         VBox sideButtons = new VBox(8, sendBtn, stopBtn, closeBtn);
@@ -525,6 +548,30 @@ public class CursorAgentDialog {
     }
 
     /**
+     * 터미널 출력을 ~/llm-services/logs/cursor-agent-<ts>.log 파일로 저장한다.
+     *
+     * @return 저장된 파일 경로, 출력이 비었거나 실패하면 null
+     */
+    private Path saveSessionLog() {
+        if (terminalArea == null || terminalArea.getText() == null
+                || terminalArea.getText().isBlank()) {
+            return null;
+        }
+        try {
+            Path dir = Path.of(System.getProperty("user.home"), "llm-services", "logs");
+            Files.createDirectories(dir);
+            String ts = java.time.LocalDateTime.now().format(
+                    java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+            Path file = dir.resolve("cursor-agent-" + ts + ".log");
+            Files.writeString(file, terminalArea.getText(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            return file;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * 실행 중인 sidecar 프로세스를 강제 종료한다. 미실행이면 아무것도 하지 않는다.
      * 중지 버튼·창 닫기에서 호출되며, 결과 처리는 sendPrompt의 완료 콜백이 담당한다.
      */
@@ -558,6 +605,10 @@ public class CursorAgentDialog {
                 }
                 appendLine("  @경로 — 작업 디렉토리 기준 파일·디렉토리 링크 삽입");
             }
+            case "/save" -> {
+                Path saved = saveSessionLog();
+                appendLine(saved != null ? "세션 로그 저장: " + saved : "저장할 출력이 없거나 저장에 실패했습니다.");
+            }
             case "/clear" -> terminalArea.clear();
             case "/model" -> {
                 if (arg.isBlank()) {
@@ -577,6 +628,11 @@ public class CursorAgentDialog {
                     appendLine("현재 모드: " + sessionAgentMode + " (사용 가능: agent, plan)");
                 } else if ("agent".equals(arg) || "plan".equals(arg)) {
                     sessionAgentMode = arg;
+                    // cwd·model과 동일하게 다음 세션 기본값으로 저장
+                    var repo = AppContext.getInstance().getAppSettingsRepository();
+                    var settings = repo.get();
+                    settings.setPluginSetting(contribution.pluginId(), "cursor.defaultMode", sessionAgentMode);
+                    repo.save(settings);
                     appendLine("모드 변경: " + sessionAgentMode);
                 } else {
                     appendLine("지원하지 않는 모드: " + arg + " (사용 가능: agent, plan)");
@@ -747,7 +803,7 @@ public class CursorAgentDialog {
         }
 
         if (arg.isBlank()) {
-            List<Path> files = listAgentFiles(agentsDir);
+            List<Path> files = listFilesByExtension(agentsDir, ".md");
             if (files.isEmpty() && loadedAgents.isEmpty()) {
                 appendLine("agent 정의가 없습니다. " + agentsDir + " 에 *.md 파일을 추가하세요.");
                 return;
@@ -779,19 +835,6 @@ public class CursorAgentDialog {
             appendLine("다음 실행부터 서브에이전트로 사용 가능합니다. 프롬프트에서 이름으로 위임을 지시하세요.");
         } catch (Exception e) {
             appendLine("agent 로드 실패: " + e.getMessage());
-        }
-    }
-
-    /** agents 디렉토리의 *.md 파일을 이름순으로 반환한다. 디렉토리가 없으면 빈 목록. */
-    private List<Path> listAgentFiles(Path agentsDir) {
-        if (!Files.isDirectory(agentsDir)) return List.of();
-        try (Stream<Path> stream = Files.list(agentsDir)) {
-            return stream
-                    .filter(p -> p.getFileName().toString().endsWith(".md"))
-                    .sorted(Comparator.comparing(p -> p.getFileName().toString()))
-                    .toList();
-        } catch (Exception e) {
-            return List.of();
         }
     }
 

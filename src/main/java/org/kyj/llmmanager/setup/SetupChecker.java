@@ -228,6 +228,11 @@ public class SetupChecker {
                 return null;
             }
             reader.join(1000);
+            // 출력이 아직 다 읽히지 않았으면 잘린 출력으로 버전을 오판하지 않도록 실패 처리
+            if (reader.isAlive()) {
+                log.warn("[setup] {} output read timed out", label);
+                return null;
+            }
             log.debug("[setup] {} → exit={}", label, proc.exitValue());
             if (proc.exitValue() != 0) return null;
             // python --version 등 콘솔 출력은 플랫폼 기본 인코딩
