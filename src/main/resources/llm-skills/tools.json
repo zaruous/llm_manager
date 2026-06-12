@@ -59,5 +59,63 @@
         ]
       }
     ]
+  },
+  {
+    "id": "wiki-agent",
+    "name": "LLM Wiki Agent",
+    "emoji": "📚",
+    "description": "문서를 수집해 지식 위키를 자동 구축하는 에이전트 스킬 (llm-wiki-agent)",
+    "packs": [
+      {
+        "id": "wiki-skeleton",
+        "name": "위키 워크스페이스 골격 (raw/wiki/graph)",
+        "tags": ["wiki", "general"],
+        "files": [
+          { "resourcePath": "llm-skills/wiki-agent/wiki-index-template.md",
+            "targetPath": "wiki/index.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/wiki-log-template.md",
+            "targetPath": "wiki/log.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/graph-gitignore",
+            "targetPath": "graph/.gitignore", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/gitkeep",
+            "targetPath": "raw/.gitkeep", "template": false }
+        ]
+      },
+      {
+        "id": "wiki-claude",
+        "name": "Claude Code 스킬 (/wiki-ingest 등 + CLAUDE.md 스키마)",
+        "tags": ["wiki", "claude"],
+        "files": [
+          { "resourcePath": "llm-skills/wiki-agent/commands/wiki-ingest.md",
+            "targetPath": ".claude/commands/wiki-ingest.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/commands/wiki-query.md",
+            "targetPath": ".claude/commands/wiki-query.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/commands/wiki-lint.md",
+            "targetPath": ".claude/commands/wiki-lint.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/commands/wiki-graph.md",
+            "targetPath": ".claude/commands/wiki-graph.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/CLAUDE.md",
+            "targetPath": "CLAUDE.md", "template": false }
+        ]
+      },
+      {
+        "id": "wiki-gemini",
+        "name": "Gemini CLI 스키마 (GEMINI.md)",
+        "tags": ["wiki", "gemini"],
+        "files": [
+          { "resourcePath": "llm-skills/wiki-agent/GEMINI.md",
+            "targetPath": "GEMINI.md", "template": false }
+        ]
+      },
+      {
+        "id": "wiki-codex",
+        "name": "Codex/OpenCode 스키마 (AGENTS.md)",
+        "tags": ["wiki", "codex"],
+        "files": [
+          { "resourcePath": "llm-skills/wiki-agent/AGENTS.md",
+            "targetPath": "AGENTS.md", "template": false }
+        ]
+      }
+    ]
   }
 ]

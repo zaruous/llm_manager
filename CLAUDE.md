@@ -15,7 +15,8 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 |------|------|
 | `src/main/java/org/kyj/llmmanager/` | Java 소스 루트 |
 | `src/main/resources/org/kyj/llmmanager/` | FXML / CSS / 도움말 리소스 |
-| `src/main/resources/llm-skills/` | Claude/Copilot/Cursor/Gemini 스킬 팩 리소스 |
+| `src/main/resources/llm-skills/` | Claude/Copilot/Cursor/Gemini/Wiki-Agent 스킬 팩 리소스 |
+| `plugins/wiki-agent/` | LLM Wiki Agent 플러그인 (manifest + 업스트림 Python 도구) |
 | `service-packs/` | 기본 제공 서비스 YAML (배포 포함). `ServicePackLoader`가 로드 |
 | `bin/` | 배포·설치 PowerShell 스크립트 |
 | `lib/hotswap/hotswap-agent.jar` | 개발용 HotswapAgent (gitignore) |
@@ -87,6 +88,29 @@ LLMManager/
 - HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 의존성으로 `LlmSkillLibraryRepository` 컴파일
 
 현재 UI의 "로드" 탭은 선택 파일을 대상 프로젝트에 복사한다 (DB 저장은 미연결).
+
+### LLM Wiki Agent 통합 (2026-06-12)
+
+`docs/llm-wiki-agent-통합계획.md`의 Phase 0~4 구현 완료.
+
+- 스킬 팩: `tools.json`에 `wiki-agent` 도구 추가 (워크스페이스 골격/Claude/Gemini/Codex 팩)
+- 플러그인: `plugins/wiki-agent/` — wiki.ingest/query/health/lint/graph/openGraph 커맨드
+- `PluginCommandExecutor.runWikiTool()`이 Python 도구 실행 (UTF-8 강제, 모델 env 폴백 주입 —
+  업스트림 기본 모델은 retire되어 `claude-sonnet-4-6`/`claude-haiku-4-5`로 폴백)
+- 업스트림 도구는 wiki 경로를 스크립트 위치 기준(`Path(__file__).parent.parent`)으로 해석하므로
+  실행 전 플러그인 tools/를 워크스페이스 `tools/`로 동기화한다
+- 전용 UI: `WikiQueryDialog`(CLI 세션형 — 이력은 워크스페이스 `.llm-manager/query-history.json`),
+  `WikiIngestDialog`(멀티 파일/폴더 선택 → raw/분류 복사 → 일괄 ingest),
+  `WikiBrowserDialog`(트리 + WebView 마크다운 뷰, `[[WikiLink]]` 앱 내 이동 — help-template.html 재사용)
+- 도움말에 "LLM Wiki Agent" 항목 추가 (`docs/wiki-agent.md`)
+- 실행 에이전트 드롭다운(`wiki.agent`: claude | cursor, 기본 claude) — cursor 선택 시
+  Python 도구 대신 Cursor 사이드카에 자연어 위임(`runWikiViaCursorAgent`),
+  AGENTS.md 자동 설치, 필수 env 키도 `ANTHROPIC_API_KEY` ↔ `CURSOR_API_KEY`로
+  전환(`effectiveRequiredEnv`)
+- 실행 제어: `timeoutMinutes` 설정(기본 무제한), 중지 버튼은
+  `PluginCommandExecutor.cancel(commandId)` → `destroyProcessTree()`로 자식까지 종료.
+  워크스페이스 선택은 `wiki.defaultCwd`에 자동 영속화(`WikiWorkspaceInitializer.rememberWorkspace`).
+  사이드카 env 화이트리스트에 APPDATA 필수 — 없으면 `npm root -g`가 깨져 글로벌 SDK 탐색 실패
 
 ---
 

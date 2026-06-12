@@ -344,6 +344,12 @@ Write-Host "  pip         : $InstallDir\Scripts\pip.exe"
 Write-Host ""
 Write-Host "Open a new terminal and run 'python --version' to confirm." -ForegroundColor Yellow
 Write-Host ""
+# LLM Wiki Agent 플러그인(claude 에이전트 모드)이 요구하는 pip 의존성 안내 — 자동 설치하지 않음
+Write-Host "LLM Wiki Agent를 사용하려면 추가로 설치하세요:" -ForegroundColor Cyan
+Write-Host "  pip install litellm              (필수 — LLM 호출)"
+Write-Host "  pip install markitdown           (선택 — PDF/DOCX 변환)"
+Write-Host "  pip install networkx             (선택 — 그래프 커뮤니티 분석)"
+Write-Host ""
 
 if ($NoExit) {
     Read-Host "Press Enter to exit"

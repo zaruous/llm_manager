@@ -222,7 +222,12 @@ public class PluginCommandRunDialog {
         if (contribution == null) return;
 
         var settings = AppContext.getInstance().getAppSettingsRepository().get();
-        cwdField.setText(settings.getPluginSetting(contribution.pluginId(), "cursor.defaultCwd", ""));
+        // 플러그인별 기본 작업 디렉토리 — cursor 키 우선, 없으면 wiki 키로 폴백
+        String defaultCwd = settings.getPluginSetting(contribution.pluginId(), "cursor.defaultCwd", "");
+        if (defaultCwd.isBlank()) {
+            defaultCwd = settings.getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
+        }
+        cwdField.setText(defaultCwd);
         modelCombo.setValue(settings.getPluginSetting(contribution.pluginId(), "cursor.defaultModel", "auto"));
         modeCombo.setValue(settings.getPluginSetting(contribution.pluginId(), "cursor.mode", "sdk"));
         refreshTree(treeView, cwdField.getText());

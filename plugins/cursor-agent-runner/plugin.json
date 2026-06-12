@@ -83,6 +83,19 @@
                   "sdk",
                   "cli"
                 ]
+              },
+              {
+                "key": "timeoutMinutes",
+                "label": "실행 타임아웃 (분, 비우면 무제한)",
+                "kind": "string",
+                "defaultValue": ""
+              },
+              {
+                "key": "cursor.language",
+                "label": "응답 언어 (사고 과정 포함)",
+                "kind": "select",
+                "defaultValue": "한국어",
+                "options": ["한국어", "English"]
               }
             ]
           }

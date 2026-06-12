@@ -106,14 +106,47 @@ async function main() {
   try {
     writeLine("status", "Cursor Agent 시작");
     const run = await agent.send(request.prompt);
+    // 텍스트 델타를 줄 단위로 모아 내보내는 버퍼 — 토큰 단위 스팸 방지
+    let textBuf = "";
+    const flushText = (force) => {
+      while (true) {
+        const nl = textBuf.indexOf("\n");
+        if (nl < 0) break;
+        const line = textBuf.slice(0, nl);
+        textBuf = textBuf.slice(nl + 1);
+        if (line.trim()) writeLine("text", line);
+      }
+      if ((force || textBuf.length > 400) && textBuf.trim()) {
+        writeLine("text", textBuf);
+        textBuf = "";
+      }
+    };
+    let lastStatus = "";
+    let lastTextKind = "";
     for await (const event of run.stream()) {
       const summary = summarizeEvent(event);
       events.push(summary);
+      const extracted = extractText(event);
+      if (extracted) {
+        // think ↔ 응답 구간이 바뀔 때 구분자 출력 — 사고 블록을 시각적으로 분리
+        if (lastTextKind && extracted.kind !== lastTextKind) {
+          flushText(true);
+          writeLine("text", "------");
+        }
+        lastTextKind = extracted.kind;
+        textBuf += extracted.text;
+        flushText(false);
+        continue;
+      }
       const status = extractStatus(event);
-      if (status) {
+      // running/completed는 매 스텝 반복되는 노이즈 — 그 외 상태만, 변경 시에만 표시
+      if (status && status !== lastStatus
+          && status !== "running" && status !== "completed") {
         writeLine("status", "status: " + status);
       }
+      if (status) lastStatus = status;
     }
+    flushText(true);
     if (typeof run.wait === "function") {
       const result = await run.wait();
       finalStatus = summarizeValue(result);
@@ -192,6 +225,29 @@ function extractStatus(event) {
   if (event.type === "status" && event.status) return event.status;
   if (event.status && event.type !== "assistant") return event.status;
   return "";
+}
+
+/**
+ * 이벤트에서 사용자에게 보여줄 텍스트(어시스턴트 응답·사고 과정)를 추출한다.
+ * SDK 이벤트 스키마가 버전마다 다를 수 있어 방어적으로 여러 필드를 본다.
+ *
+ * @returns {{kind: string, text: string}|null} kind는 'think' 또는 'text'
+ */
+function extractText(event) {
+  if (!event || typeof event !== "object") return null;
+  const type = String(event.type || event.kind || "");
+  let payload = event.text || event.delta || event.message || event.content || "";
+  // content가 블록 배열인 경우 (예: [{type:'text', text:'...'}])
+  if (Array.isArray(payload)) {
+    payload = payload
+      .map((item) => (item && typeof item === "object" ? item.text || "" : String(item || "")))
+      .join("");
+  }
+  if (typeof payload !== "string" || !payload.trim()) return null;
+  // 사고 과정·어시스턴트 텍스트류만 노출, 도구 호출 인자 등은 제외
+  if (/think|reason/i.test(type)) return { kind: "think", text: payload };
+  if (/assistant|text|message|output|response/i.test(type)) return { kind: "text", text: payload };
+  return null;
 }
 
 function isErrorResult(result) {

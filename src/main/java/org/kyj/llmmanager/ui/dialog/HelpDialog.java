@@ -41,6 +41,7 @@ public class HelpDialog {
         TOPICS.put("SQL Gen MCP Server",       "docs/sql-gen-mcp.md");
         TOPICS.put("LLM 스킬 설치",             "docs/llm-skills-install.md");
         TOPICS.put("LLM 스킬 로드",             "docs/llm-skills-load.md");
+        TOPICS.put("LLM Wiki Agent",           "docs/wiki-agent.md");
     }
 
     /**

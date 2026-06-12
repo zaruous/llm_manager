@@ -24,6 +24,9 @@ import org.kyj.llmmanager.ui.dialog.HelpDialog;
 import org.kyj.llmmanager.ui.dialog.PluginCommandRunDialog;
 import org.kyj.llmmanager.ui.dialog.PluginManagerDialog;
 import org.kyj.llmmanager.ui.dialog.SettingsDialog;
+import org.kyj.llmmanager.ui.dialog.WikiBrowserDialog;
+import org.kyj.llmmanager.ui.dialog.WikiIngestDialog;
+import org.kyj.llmmanager.ui.dialog.WikiQueryDialog;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
@@ -1036,6 +1039,18 @@ public class MainController implements Initializable {
         if ("cursor.runAgent".equals(c.command().getId())) {
             item.setOnAction(e -> new CursorAgentDialog(
                     (Stage) menuBar.getScene().getWindow(), c).show());
+        } else if ("wiki.query".equals(c.command().getId())) {
+            // 위키 질의는 과거 문답 이력이 쌓이는 CLI 세션 UX로 실행
+            item.setOnAction(e -> new WikiQueryDialog(
+                    (Stage) menuBar.getScene().getWindow(), c).show());
+        } else if ("wiki.ingest".equals(c.command().getId())) {
+            // 문서 수집은 파일 멀티 선택 + raw/ 분류 복사 전용 UX로 실행
+            item.setOnAction(e -> new WikiIngestDialog(
+                    (Stage) menuBar.getScene().getWindow(), c).show());
+        } else if ("wiki.browse".equals(c.command().getId())) {
+            // 위키 브라우저는 트리 + 마크다운 뷰 전용 창으로 실행
+            item.setOnAction(e -> new WikiBrowserDialog(
+                    (Stage) menuBar.getScene().getWindow()).show());
         } else {
             item.setOnAction(e -> new PluginCommandRunDialog((Stage) menuBar.getScene().getWindow())
                     .show(c.command().getId()));
