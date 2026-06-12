@@ -45,7 +45,7 @@ A 방식은 스킬 팩 설치 후 Claude Code에서 `/wiki-ingest`, `/wiki-query
 |------|------|---------|
 | 문서 수집 (Ingest) | 파일·폴더를 멀티 선택해 `raw/분류/`로 복사 후 위키 페이지 생성 | 발생 (파일 수 비례) |
 | 위키 질의 (Query) | CLI 세션처럼 질문·응답. 이력은 워크스페이스에 저장되어 복원됨 | 발생 |
-| 구조 검사 (Health) | 고아 페이지·끊긴 링크 검사 → `wiki/health-report.md` | **없음 (무료)** |
+| 구조 검사 (Health) | 빈 페이지·인덱스 불일치·수집 로그 누락 검사 → `wiki/health-report.md` | 없음 |
 | 품질 검사 (Lint) | 모순·낡은 내용 검사 → `wiki/lint-report.md` | 발생 |
 | 그래프 빌드 (Graph) | 지식 그래프 생성 → `graph/graph.html` | 발생 |
 | 그래프 열기 | 빌드된 그래프를 OS 기본 브라우저로 열기 | 없음 |

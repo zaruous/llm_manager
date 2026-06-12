@@ -32,7 +32,7 @@
       {
         "id": "wiki.health",
         "title": "구조 검사 (Health)",
-        "description": "빈 페이지·인덱스 불일치·수집 로그 누락을 검사합니다. LLM 호출 없음 (무료).",
+        "description": "빈 페이지·인덱스 불일치·수집 로그 누락을 검사합니다. LLM 호출 없음.",
         "requires": {
           "cwd": true
         }
