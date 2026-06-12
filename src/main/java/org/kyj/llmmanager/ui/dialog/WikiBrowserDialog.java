@@ -89,6 +89,8 @@ public class WikiBrowserDialog {
 
     /** 페이지 키(소문자 정규화된 이름) → 파일 경로. 워크스페이스 스캔 시 재구축. */
     private final Map<String, Path> pageIndex = new LinkedHashMap<>();
+    /** 검색 대상 전체 페이지 목록 (트리 구성 순서 유지). 워크스페이스 스캔 시 재구축. */
+    private final List<Path> allPages = new ArrayList<>();
     /** 뒤로 가기 스택 — 현재 표시 중인 페이지 경로를 push한다. */
     private final Deque<Path> backStack = new ArrayDeque<>();
 
@@ -96,6 +98,8 @@ public class WikiBrowserDialog {
     private Path currentPage;
     private WebView webView;
     private TreeView<PageNode> treeView;
+    /** 검색 전의 일반 트리 — 검색어를 지우면 이걸로 복원한다. */
+    private TreeItem<PageNode> normalTreeRoot;
     /** locationProperty 리스너의 재진입 방지 플래그 */
     private boolean navigating;
 
@@ -187,7 +191,19 @@ public class WikiBrowserDialog {
             }
         });
 
-        SplitPane split = new SplitPane(treeView, webView);
+        // 키워드 검색 — Enter로 제목·본문 검색, 비우면 원래 트리 복원
+        TextField searchField = new TextField();
+        searchField.setPromptText("키워드 검색 (제목·본문, Enter)");
+        searchField.setOnAction(e -> runSearch(searchField.getText()));
+        searchField.textProperty().addListener((obs, old, value) -> {
+            if (value == null || value.isBlank()) rebuildTree();
+        });
+
+        VBox left = new VBox(8, searchField, treeView);
+        left.setPadding(new Insets(0, 0, 0, 0));
+        VBox.setVgrow(treeView, Priority.ALWAYS);
+
+        SplitPane split = new SplitPane(left, webView);
         split.setDividerPositions(0.26);
 
         VBox root = new VBox(topBar, split);
@@ -209,6 +225,7 @@ public class WikiBrowserDialog {
         backStack.clear();
         currentPage = null;
         pageIndex.clear();
+        allPages.clear();
 
         TreeItem<PageNode> root = new TreeItem<>(new PageNode("wiki", null));
         root.setExpanded(true);
@@ -237,6 +254,7 @@ public class WikiBrowserDialog {
             if (Files.isRegularFile(file)) {
                 docs.getChildren().add(new TreeItem<>(new PageNode(stem(name), file)));
                 indexPage(file);
+                allPages.add(file);
             }
         }
         root.getChildren().add(docs);
@@ -250,6 +268,7 @@ public class WikiBrowserDialog {
             for (Path page : pages) {
                 catItem.getChildren().add(new TreeItem<>(new PageNode(stem(page), page)));
                 indexPage(page);
+                allPages.add(page);
             }
             root.getChildren().add(catItem);
         }
@@ -260,10 +279,12 @@ public class WikiBrowserDialog {
             Path file = wikiDir.resolve(name);
             if (Files.isRegularFile(file)) {
                 reports.getChildren().add(new TreeItem<>(new PageNode(stem(name), file)));
+                allPages.add(file);
             }
         }
         if (!reports.getChildren().isEmpty()) root.getChildren().add(reports);
 
+        normalTreeRoot = root;
         treeView.setRoot(root);
 
         Path overview = wikiDir.resolve("overview.md");
@@ -318,6 +339,73 @@ public class WikiBrowserDialog {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    // ─────────────────────────────────────────────
+    // 키워드 검색
+    // ─────────────────────────────────────────────
+
+    /** 검색어를 지웠을 때 일반 트리로 복원한다. */
+    private void rebuildTree() {
+        if (normalTreeRoot != null) treeView.setRoot(normalTreeRoot);
+    }
+
+    /**
+     * 제목·본문 키워드 검색을 백그라운드에서 실행하고 결과로 트리를 전환한다.
+     * 제목 일치(★)가 본문 일치보다 위에 정렬된다.
+     */
+    private void runSearch(String query) {
+        String keyword = query == null ? "" : query.trim();
+        if (keyword.isEmpty()) {
+            rebuildTree();
+            return;
+        }
+        List<Path> targets = new ArrayList<>(allPages);
+        String lower = keyword.toLowerCase(Locale.ROOT);
+
+        new Thread(() -> {
+            List<PageNode> titleHits = new ArrayList<>();
+            List<PageNode> contentHits = new ArrayList<>();
+            for (Path page : targets) {
+                try {
+                    String name = stem(page);
+                    String label = name + "  ·  " + categoryOf(page);
+                    if (name.toLowerCase(Locale.ROOT).contains(lower)) {
+                        titleHits.add(new PageNode("★ " + label, page));
+                        continue;
+                    }
+                    String content = Files.readString(page, StandardCharsets.UTF_8);
+                    if (content.toLowerCase(Locale.ROOT).contains(lower)) {
+                        contentHits.add(new PageNode(label, page));
+                    }
+                } catch (Exception ignored) {
+                    // 읽기 실패 페이지는 검색 결과에서 제외
+                }
+            }
+            List<PageNode> results = new ArrayList<>(titleHits);
+            results.addAll(contentHits);
+            Platform.runLater(() -> showSearchResults(keyword, results));
+        }, "wiki-search").start();
+    }
+
+    private void showSearchResults(String keyword, List<PageNode> results) {
+        TreeItem<PageNode> root = new TreeItem<>(new PageNode("root", null));
+        TreeItem<PageNode> group = new TreeItem<>(
+                new PageNode("검색: \"" + keyword + "\" (" + results.size() + "건)", null));
+        group.setExpanded(true);
+        for (PageNode result : results) {
+            group.getChildren().add(new TreeItem<>(result));
+        }
+        root.getChildren().add(group);
+        treeView.setRoot(root);
+    }
+
+    /** 페이지가 속한 카테고리(부모 디렉토리) 표시명 — wiki 루트 직속이면 "문서". */
+    private String categoryOf(Path page) {
+        Path parent = page.getParent();
+        if (parent == null) return "";
+        String name = parent.getFileName() != null ? parent.getFileName().toString() : "";
+        return "wiki".equalsIgnoreCase(name) ? "문서" : name;
     }
 
     // ─────────────────────────────────────────────
