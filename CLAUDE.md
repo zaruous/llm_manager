@@ -91,7 +91,7 @@ LLMManager/
 
 ### LLM Wiki Agent 통합 (2026-06-12)
 
-`docs/llm-wiki-agent-통합계획.md`의 Phase 0~4 구현 완료.
+`docs/done/llm-wiki-agent-통합계획.md`의 Phase 0~4 구현 완료 (완료 문서는 `docs/done/`에 보관).
 
 - 스킬 팩: `tools.json`에 `wiki-agent` 도구 추가 (워크스페이스 골격/Claude/Gemini/Codex 팩)
 - 플러그인: `plugins/wiki-agent/` — wiki.ingest/query/health/lint/graph/openGraph 커맨드

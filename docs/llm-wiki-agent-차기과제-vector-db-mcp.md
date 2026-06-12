@@ -1,7 +1,7 @@
 # LLM Wiki Agent 차기 과제 — Vector DB · MCP 통합
 
 > 작성일: 2026-06-12
-> 선행 문서: [llm-wiki-agent-통합계획.md](llm-wiki-agent-통합계획.md) (Phase 0~4)
+> 선행 문서: [llm-wiki-agent-통합계획.md](done/llm-wiki-agent-통합계획.md) (Phase 0~4 — 완료, done/ 보관)
 > 상태: **차기 과제 (다음 단계)** — 본 계획의 Phase 1~3 완료 후 착수
 
 ---

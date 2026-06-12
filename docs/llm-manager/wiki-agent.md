@@ -1,6 +1,6 @@
 # LLM Wiki Agent 사용 가이드
 
-> 관련 문서: [통합 계획·구현 체크리스트](../llm-wiki-agent-통합계획.md) ·
+> 관련 문서: [통합 계획·구현 체크리스트](../done/llm-wiki-agent-통합계획.md) ·
 > [차기 과제 (Vector DB·MCP)](../llm-wiki-agent-차기과제-vector-db-mcp.md)
 > 앱 내 도움말(도움말 > LLM Wiki Agent)과 동일한 내용의 저장소 보관용 문서.
 
@@ -70,7 +70,7 @@
 - **중지/취소**: `PluginCommandExecutor.cancel(commandId)` → `destroyProcessTree()`
 - **사이드카 출력**: status 노이즈 억제, 응답·사고 텍스트 스트리밍, think ↔ 응답 전환 시
   `------` 구분자
-- 자세한 이력은 [통합 계획 문서](../llm-wiki-agent-통합계획.md)의 구현 체크리스트 참조
+- 자세한 이력은 [통합 계획 문서](../done/llm-wiki-agent-통합계획.md)의 구현 체크리스트 참조
 
 ## 트러블슈팅
 

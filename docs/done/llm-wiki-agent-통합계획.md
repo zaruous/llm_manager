@@ -552,6 +552,6 @@ Phase 2~3은 독립적으로 중단·연기 가능하다.
 
 Phase 1~3 완료 후의 확장 계획은 별도 문서로 관리한다.
 
-- **[llm-wiki-agent-차기과제-vector-db-mcp.md](llm-wiki-agent-차기과제-vector-db-mcp.md)**
+- **[llm-wiki-agent-차기과제-vector-db-mcp.md](../llm-wiki-agent-차기과제-vector-db-mcp.md)**
   - Phase 5: Vector DB 통합 — bgem3-embedding 서비스 팩 재활용, SQLite+sqlite-vec 색인, 시맨틱 검색
   - Phase 6: wiki-mcp 서버 — 위키를 MCP 도구로 노출 (`wiki_search`·`wiki_get_page` 등), service-pack(`wiki-mcp.yml`)으로 등록해 외부 에이전트가 위키 지식을 활용
