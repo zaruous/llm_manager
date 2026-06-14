@@ -10,7 +10,6 @@ name: Validate Install Scripts
 on:
   workflow_dispatch:
   push:
-    branches: ['claude/java-setup-script-review-3x20o9']
     paths:
       - 'bin/*.ps1'
       - '.github/workflows/validate-scripts.yml'

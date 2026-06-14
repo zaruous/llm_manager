@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.kyj'
-version = '1.0.0'
+version = '1.0.4'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -173,6 +173,7 @@ distributions {
             from('bin') {
                 include 'install-python.ps1'
                 include 'install-nvidia-driver.ps1'
+                include 'install-nodejs.ps1'
                 into('bin')
             }
             from('service-packs') {
@@ -253,6 +254,7 @@ tasks.register('prepareJpackageInput', Copy) {
     from(project.file('bin')) {
         include 'install-python.ps1'
         include 'install-nvidia-driver.ps1'
+        include 'install-nodejs.ps1'
         into 'bin'
     }
 

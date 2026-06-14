@@ -1,9 +1,8 @@
-# Windows EXE 인스톨러 빌드 (jpackage + WiX)
+# Windows 인스톨러·포터블 이미지 빌드 (jpackage + WiX)
 #
 # 트리거:
-#   - workflow_dispatch : Actions 탭에서 수동 실행
-#   - v* 태그 푸시      : 릴리스 빌드
-#   - 검증 브랜치 푸시   : 워크플로 동작 확인용 (검증 완료 후 제거 가능)
+#   - workflow_dispatch : Actions 탭에서 수동 실행 (Artifact 업로드만)
+#   - v* 태그 푸시      : 릴리스 빌드 → GitHub Release 생성 + EXE·zip 첨부
 #
 # 참고: lib/*.jar 번들 파일(sql-gen/swagger 서버 JAR 등)은 gitignore라
 # CI 산출물에는 포함되지 않는다. 인스톨러 생성 자체의 검증이 목적.
@@ -13,7 +12,9 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
-    branches: ['claude/java-setup-script-review-3x20o9']
+
+permissions:
+  contents: write   # GitHub Release 생성·파일 첨부에 필요
 
 jobs:
   build-exe:
@@ -33,7 +34,8 @@ jobs:
       - name: Download WiX Toolset
         run: powershell -ExecutionPolicy Bypass -File bin/Download-WiX.ps1
 
-      - name: Build EXE installer
+      # jpackageExe 가 jpackageImage 에 의존하므로 한 번에 둘 다 생성된다.
+      - name: Build app-image + EXE installer
         run: ./gradlew.bat jpackageExe --no-daemon
 
       - name: Verify installer output
@@ -42,8 +44,34 @@ jobs:
           if (-not $exe) { Write-Error "EXE not found in build/installer"; exit 1 }
           $exe | ForEach-Object { Write-Host "OK: $($_.Name) ($([math]::Round($_.Length / 1MB, 1)) MB)" }
 
+      # 포터블 배포용 zip — app-image 폴더 전체를 압축
+      - name: Package portable zip
+        run: |
+          $version = (./gradlew.bat -q properties --property version | Select-String '^version:').ToString().Split(':')[1].Trim()
+          $zipName = "LLMManager-${version}.zip"
+          Compress-Archive -Path build/installer/LLMManager -DestinationPath "build/installer/$zipName" -Force
+          Write-Host "OK: $zipName ($([math]::Round((Get-Item build/installer/$zipName).Length / 1MB, 1)) MB)"
+
       - uses: actions/upload-artifact@v4
         with:
           name: LLMManager-installer
-          path: build/installer/LLMManager-*.exe
+          path: |
+            build/installer/LLMManager-*.exe
+            build/installer/LLMManager-*.zip
           if-no-files-found: error
+
+      # v* 태그 푸시 시에만 GitHub Release를 생성하고 산출물을 첨부한다.
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $files = Get-ChildItem build/installer -Filter 'LLMManager-*' |
+                   Where-Object { $_.Extension -in '.exe', '.zip' } |
+                   ForEach-Object { $_.FullName }
+          gh release create $tag `
+            --title "LLM Manager $tag" `
+            --generate-notes `
+            --draft `
+            @files
