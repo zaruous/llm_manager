@@ -5,17 +5,16 @@
 package org.kyj.llmmanager.setup;
 
 /**
- * 환경 체크 다이얼로그에서 확인·설치하는 환경 항목.
+ * 앱 기동 전 확인해야 할 환경 항목.
  * 각 항목은 이름·설명·필수 여부·설치 스크립트 경로를 갖는다.
- * required=true 항목이 미통과면 앱 기동 시 다이얼로그가 표시되고 '계속'이 비활성화된다.
- * 현재 모든 항목은 선택 항목 — Python은 PYTHON 런타임 서비스의 설치/시작 시점에 검사한다.
+ * required=true 항목이 모두 통과해야 메인 창을 열 수 있다.
  */
 public enum SetupItem {
 
     PYTHON(
             "Python 3.x",
-            "BGE-M3 서버 실행에 필요한 런타임입니다. 서비스 설치/시작 시점에 다시 확인합니다.",
-            false,
+            "BGE-M3 서버 실행에 반드시 필요한 런타임입니다.",
+            true,
             "bin/install-python.ps1"
     ),
 

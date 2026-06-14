@@ -4,7 +4,7 @@
  */
 package org.kyj.llmmanager.setup;
 
-import org.kyj.llmmanager.util.ToolLocator;
+import org.kyj.llmmanager.util.PlatformUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,6 +13,7 @@ import java.nio.charset.Charset;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -79,13 +80,18 @@ public class SetupChecker {
 
     /**
      * python --version 실행 결과로 Python 3.x 설치 여부를 판별한다.
-     * ToolLocator가 PATH 이름과 알려진 설치 경로(설치 직후 PATH 미반영 케이스)를
-     * 모두 후보로 제공한다.
+     * python 명령이 없으면 python3으로 재시도하고,
+     * PATH에 없으면 알려진 설치 경로(레지스트리 기본 위치)를 직접 탐색한다.
      */
     private boolean checkPython() {
-        for (String cmd : ToolLocator.candidateCommands("python")) {
-            if (isPython3(List.of(cmd, "--version"))) {
-                log.debug("[setup] python found: {}", cmd);
+        if (isPython3(List.of("python", "--version"))) return true;
+        if (isPython3(List.of("python3", "--version"))) return true;
+
+        // 설치 직후 PATH가 현재 프로세스에 반영되지 않는 케이스 —
+        // install-python.ps1의 기본 설치 경로를 직접 탐색한다
+        for (Path exe : findKnownPythonExecutables()) {
+            if (isPython3(List.of(exe.toString(), "--version"))) {
+                log.info("[setup] python found at {}", exe);
                 return true;
             }
         }
@@ -99,6 +105,37 @@ public class SetupChecker {
     private boolean isPython3(List<String> command) {
         String out = runCommandCapture("Python 3", command);
         return out != null && out.contains("Python 3");
+    }
+
+    /**
+     * install-python.ps1이 사용하는 기본 설치 경로에서 python.exe를 찾는다.
+     * 관리자 설치(C:\Python3xx)와 사용자 설치(%LOCALAPPDATA%\Programs\Python\Python3xx) 모두 탐색.
+     *
+     * @return 존재하는 python.exe 경로 목록 (Windows 외 OS에서는 빈 목록)
+     */
+    private List<Path> findKnownPythonExecutables() {
+        List<Path> found = new ArrayList<>();
+        if (!PlatformUtil.isWindows()) return found;
+
+        List<Path> roots = new ArrayList<>();
+        String localAppData = System.getenv("LOCALAPPDATA");
+        if (localAppData != null && !localAppData.isBlank()) {
+            roots.add(Path.of(localAppData, "Programs", "Python"));
+        }
+        roots.add(Path.of("C:\\"));
+
+        for (Path root : roots) {
+            if (!Files.isDirectory(root)) continue;
+            try (DirectoryStream<Path> dirs = Files.newDirectoryStream(root, "Python*")) {
+                for (Path dir : dirs) {
+                    Path exe = dir.resolve("python.exe");
+                    if (Files.isExecutable(exe)) found.add(exe);
+                }
+            } catch (IOException e) {
+                log.debug("[setup] python path scan failed: {}", e.getMessage());
+            }
+        }
+        return found;
     }
 
     /**
@@ -156,13 +193,18 @@ public class SetupChecker {
 
     /**
      * node --version의 메이저 버전이 22 이상인지 확인한다.
-     * ToolLocator가 PATH 이름과 MSI 기본 설치 경로(설치 직후 PATH 미반영 케이스)를
-     * 모두 후보로 제공한다.
+     * PATH에 없으면 MSI 기본 설치 경로(Program Files\nodejs)를 직접 탐색해
+     * 설치 직후 PATH 미반영 케이스를 처리한다.
      */
     private boolean checkNodeJs() {
-        for (String cmd : ToolLocator.candidateCommands("node")) {
-            if (isNodeVersionOk(List.of(cmd, "--version"))) {
-                log.debug("[setup] node found: {}", cmd);
+        if (isNodeVersionOk(List.of("node", "--version"))) return true;
+
+        if (PlatformUtil.isWindows()) {
+            Path exe = Path.of(
+                    System.getenv().getOrDefault("ProgramFiles", "C:\\Program Files"),
+                    "nodejs", "node.exe");
+            if (Files.isExecutable(exe) && isNodeVersionOk(List.of(exe.toString(), "--version"))) {
+                log.info("[setup] node found at {}", exe);
                 return true;
             }
         }
@@ -228,11 +270,6 @@ public class SetupChecker {
                 return null;
             }
             reader.join(1000);
-            // 출력이 아직 다 읽히지 않았으면 잘린 출력으로 버전을 오판하지 않도록 실패 처리
-            if (reader.isAlive()) {
-                log.warn("[setup] {} output read timed out", label);
-                return null;
-            }
             log.debug("[setup] {} → exit={}", label, proc.exitValue());
             if (proc.exitValue() != 0) return null;
             // python --version 등 콘솔 출력은 플랫폼 기본 인코딩

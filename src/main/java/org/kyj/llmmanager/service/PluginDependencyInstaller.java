@@ -6,7 +6,6 @@ package org.kyj.llmmanager.service;
 
 import org.kyj.llmmanager.model.plugin.LoadedPlugin;
 import org.kyj.llmmanager.util.PlatformUtil;
-import org.kyj.llmmanager.util.ToolLocator;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -105,11 +104,9 @@ public class PluginDependencyInstaller {
         boolean hasNpm = !plugin.getManifest().getInstall().getNpmPackages().isEmpty()
                 || Files.isRegularFile(pluginDir.resolve("package.json"));
         if (hasNpm) {
-            // node/npm 가용성 먼저 확인 — 미설치 시 'npm is not recognized' 대신 안내 메시지.
-            // ToolLocator가 설치 직후 PATH 미반영 케이스도 알려진 경로 폴백으로 처리
-            if (ToolLocator.resolveCommand("node") == null
-                    || ToolLocator.resolveCommand("npm") == null) {
-                cb.onLog("[오류] Node.js(npm)를 찾을 수 없습니다.");
+            // node/npm 가용성 먼저 확인 — 미설치 시 'npm is not recognized' 대신 안내 메시지
+            if (!runSilent("node --version") || !runSilent("npm --version")) {
+                cb.onLog("[오류] Node.js(npm)가 PATH에 없습니다.");
                 cb.onLog("메뉴 [설정 > 필요 라이브러리 설치]에서 Node.js를 설치한 뒤 다시 시도하세요.");
                 cb.onDone(false);
                 return;
@@ -123,15 +120,15 @@ public class PluginDependencyInstaller {
                     || Files.isRegularFile(pluginDir.resolve("requirements.txt"));
             if (hasPip) {
                 // python/pip 가용성 먼저 확인
-                String python = ToolLocator.resolveCommand("python");
-                String pip = ToolLocator.resolveCommand("pip");
+                String python = resolvePython();
+                String pip = resolvePip();
                 if (python == null) {
-                    cb.onLog("[오류] Python을 찾을 수 없습니다. 메뉴 [설정 > 필요 라이브러리 설치]에서 설치하세요.");
+                    cb.onLog("[오류] Python이 PATH에 없습니다. python 또는 python3을 먼저 설치하세요.");
                     cb.onDone(false);
                     return;
                 }
                 if (pip == null) {
-                    cb.onLog("[오류] pip를 찾을 수 없습니다. 메뉴 [설정 > 필요 라이브러리 설치]에서 Python 3을 설치하세요.");
+                    cb.onLog("[오류] pip가 PATH에 없습니다. pip 또는 pip3을 먼저 설치하세요.");
                     cb.onDone(false);
                     return;
                 }
@@ -152,8 +149,6 @@ public class PluginDependencyInstaller {
             if (workDir != null) cb.onLog("cwd: " + workDir);
             ProcessBuilder pb = new ProcessBuilder(command);
             if (workDir != null) pb.directory(workDir.toFile());
-            // 설치 직후 PATH 미반영 케이스 — 셸이 npm/pip 등을 찾도록 알려진 도구 경로 추가
-            ToolLocator.augmentPath(pb.environment());
             pb.redirectErrorStream(true);
             Process process = pb.start();
 
@@ -195,14 +190,9 @@ public class PluginDependencyInstaller {
         List<String> packages = plugin.getManifest().getInstall().getPipPackages();
         // requirements.txt가 있으면 우선 사용
         if (packages.isEmpty() && Files.isRegularFile(pluginDir.resolve("requirements.txt"))) {
-            return quoteIfNeeded(pip) + " install -r requirements.txt";
+            return pip + " install -r requirements.txt";
         }
-        return quoteIfNeeded(pip) + " install " + String.join(" ", packages);
-    }
-
-    /** 절대 경로로 해석된 명령에 공백이 있으면 셸 실행용으로 따옴표를 감싼다. */
-    private String quoteIfNeeded(String command) {
-        return command.contains(" ") ? "\"" + command + "\"" : command;
+        return pip + " install " + String.join(" ", packages);
     }
 
     private String packageNameOnly(String packageSpec) {
@@ -233,10 +223,9 @@ public class PluginDependencyInstaller {
             String[] command = PlatformUtil.isWindows()
                     ? new String[]{"cmd.exe", "/c", "npm root -g"}
                     : new String[]{"bash", "-lc", "npm root -g"};
-            ProcessBuilder pb = new ProcessBuilder(command).redirectErrorStream(true);
-            // 설치 직후 PATH 미반영 케이스 — 셸이 npm을 찾도록 알려진 도구 경로 추가
-            ToolLocator.augmentPath(pb.environment());
-            Process process = pb.start();
+            Process process = new ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start();
             boolean done = process.waitFor(5, TimeUnit.SECONDS);
             if (!done || process.exitValue() != 0) return false;
             String root = new String(process.getInputStream().readAllBytes()).trim();
@@ -255,19 +244,55 @@ public class PluginDependencyInstaller {
      */
     private boolean isPipPackageInstalled(String packageName) {
         if (packageName == null || packageName.isBlank()) return false;
-        String pip = ToolLocator.resolveCommand("pip");
+        String pip = resolvePip();
         if (pip == null) return false;
-        String commandText = quoteIfNeeded(pip) + " show " + packageName;
         try {
             String[] command = PlatformUtil.isWindows()
-                    ? new String[]{"cmd.exe", "/c", commandText}
-                    : new String[]{"bash", "-lc", commandText};
+                    ? new String[]{"cmd.exe", "/c", pip + " show " + packageName}
+                    : new String[]{"bash", "-lc", pip + " show " + packageName};
             Process process = new ProcessBuilder(command)
                     .redirectErrorStream(true)
                     .start();
             process.getInputStream().transferTo(OutputStream.nullOutputStream());
             boolean done = process.waitFor(5, TimeUnit.SECONDS);
             return done && process.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * PATH에서 사용 가능한 python 실행 파일 이름을 반환한다.
+     *
+     * @return "python3" 또는 "python", 없으면 null
+     */
+    private String resolvePython() {
+        for (String candidate : new String[]{"python3", "python"}) {
+            if (runSilent(candidate + " --version")) return candidate;
+        }
+        return null;
+    }
+
+    /**
+     * PATH에서 사용 가능한 pip 실행 파일 이름을 반환한다.
+     *
+     * @return "pip3" 또는 "pip", 없으면 null
+     */
+    private String resolvePip() {
+        for (String candidate : new String[]{"pip3", "pip"}) {
+            if (runSilent(candidate + " --version")) return candidate;
+        }
+        return null;
+    }
+
+    private boolean runSilent(String command) {
+        try {
+            String[] cmd = PlatformUtil.isWindows()
+                    ? new String[]{"cmd.exe", "/c", command}
+                    : new String[]{"bash", "-lc", command};
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            p.getInputStream().transferTo(OutputStream.nullOutputStream());
+            return p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0;
         } catch (Exception e) {
             return false;
         }

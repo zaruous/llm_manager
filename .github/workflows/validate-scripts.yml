@@ -10,8 +10,7 @@ name: Validate Install Scripts
 on:
   workflow_dispatch:
   push:
-    # 작업 브랜치에서 bin/*.ps1 변경 시 자동 검증
-    branches: ['claude/**']
+    branches: ['claude/java-setup-script-review-3x20o9']
     paths:
       - 'bin/*.ps1'
       - '.github/workflows/validate-scripts.yml'
@@ -26,7 +25,7 @@ jobs:
         shell: powershell
         run: |
           $failed = $false
-          foreach ($f in @("bin/installer-common.ps1", "bin/install-python.ps1", "bin/install-nvidia-driver.ps1", "bin/install-nodejs.ps1")) {
+          foreach ($f in @("bin/install-python.ps1", "bin/install-nvidia-driver.ps1", "bin/install-nodejs.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) {
@@ -47,7 +46,7 @@ jobs:
 
           # AST에서 함수 정의만 추출해 로드 (스크립트 본문 실행 없이 함수만 테스트)
           $tokens = $null; $errors = $null
-          $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "bin/installer-common.ps1"), [ref]$tokens, [ref]$errors)
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "bin/install-nvidia-driver.ps1"), [ref]$tokens, [ref]$errors)
           $funcs = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $true)
           foreach ($name in @("Get-EnvProxy", "Find-OfflineInstaller")) {
             $f = $funcs | Where-Object { $_.Name -eq $name }
@@ -67,19 +66,19 @@ jobs:
           Assert ((Get-EnvProxy) -eq "http://sproxy.corp:8080") "HTTPS_PROXY takes precedence"
           $env:HTTPS_PROXY = $null; $env:HTTP_PROXY = $null
 
-          $OfflineDir = Join-Path $env:TEMP "llm-offline-test"
-          New-Item -ItemType Directory -Path $OfflineDir -Force | Out-Null
-          "x" | Set-Content (Join-Path $OfflineDir "nvidia-driver-551.61.exe")
+          $OFFLINE_DIR = Join-Path $env:TEMP "llm-offline-test"
+          New-Item -ItemType Directory -Path $OFFLINE_DIR -Force | Out-Null
+          "x" | Set-Content (Join-Path $OFFLINE_DIR "nvidia-driver-551.61.exe")
           Start-Sleep -Milliseconds 1100
-          "x" | Set-Content (Join-Path $OfflineDir "nvidia-driver-560.81.exe")
-          "x" | Set-Content (Join-Path $OfflineDir "cuda_12.4.0_551.61_windows.exe")
+          "x" | Set-Content (Join-Path $OFFLINE_DIR "nvidia-driver-560.81.exe")
+          "x" | Set-Content (Join-Path $OFFLINE_DIR "cuda_12.4.0_551.61_windows.exe")
 
           Assert ((Find-OfflineInstaller "nvidia-driver*.exe") -like "*560.81*") "newest driver file selected"
           Assert ($null -ne (Find-OfflineInstaller "cuda_12.4*.exe")) "CUDA pattern matched"
           Assert ($null -eq (Find-OfflineInstaller "cuda_12.1*.exe")) "non-matching version returns null"
-          Remove-Item $OfflineDir -Recurse -Force
+          Remove-Item $OFFLINE_DIR -Recurse -Force
 
-          $OfflineDir = Join-Path $env:TEMP "no-such-dir-xyz"
+          $OFFLINE_DIR = Join-Path $env:TEMP "no-such-dir-xyz"
           Assert ($null -eq (Find-OfflineInstaller "*.exe")) "missing offline dir returns null"
 
           if ($fail) { exit 1 }
