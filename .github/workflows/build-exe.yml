@@ -61,8 +61,8 @@ jobs:
           if-no-files-found: error
 
       # v* 태그 푸시 시에만 GitHub Release를 생성하고 산출물을 첨부한다.
-      # 릴리스가 이미 존재하면 파일만 추가 업로드(--clobber)한다.
-      - name: Create or Update GitHub Release
+      # 기존 릴리스(draft 포함)를 삭제 후 재생성하여 항상 최신 상태를 보장한다.
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,13 +71,9 @@ jobs:
           $files = Get-ChildItem build/installer -Filter 'LLMManager-*' |
                    Where-Object { $_.Extension -in '.exe', '.zip' } |
                    ForEach-Object { $_.FullName }
-          $exists = gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            # 릴리스가 이미 있으면 파일만 교체 업로드
-            gh release upload $tag @files --clobber
-          } else {
-            gh release create $tag `
-              --title "LLM Manager $tag" `
-              --generate-notes `
-              @files
-          }
+          gh release delete $tag --yes 2>$null
+          gh release create $tag `
+            --title "LLM Manager $tag" `
+            --generate-notes `
+            --latest `
+            @files
