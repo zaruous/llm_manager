@@ -7,6 +7,7 @@ package org.kyj.llmmanager.service;
 import org.kyj.llmmanager.model.*;
 import org.kyj.llmmanager.util.CommandBuilder;
 import org.kyj.llmmanager.util.PlatformUtil;
+import org.kyj.llmmanager.util.ToolLocator;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,7 +16,6 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 서비스의 설치(git clone + 의존성 설치)와 설치 여부 확인을 담당한다.
@@ -65,19 +65,22 @@ public class InstallationService {
         Platform.runLater(() -> instance.setStatus(ServiceStatus.INSTALLING));
 
         try {
-            // PYTHON 런타임이면 python/pip 가용성 선행 확인
+            // PYTHON 런타임이면 python/pip 가용성 선행 확인 —
+            // ToolLocator가 설치 직후 PATH 미반영 케이스도 알려진 경로 폴백으로 처리
             if (def.getRuntimeType() == RuntimeType.PYTHON) {
-                String python = resolvePython();
-                String pip = resolvePip();
+                String python = ToolLocator.resolveCommand("python");
+                String pip = ToolLocator.resolveCommand("pip");
                 if (python == null) {
-                    emit(cb, "[오류] Python이 PATH에 없습니다. python 또는 python3을 먼저 설치하세요.");
+                    emit(cb, "[오류] Python을 찾을 수 없습니다.");
+                    emit(cb, "메뉴 [설정 > 필요 라이브러리 설치]에서 Python 3을 설치한 뒤 다시 시도하세요.");
                     Platform.runLater(() -> instance.setStatus(ServiceStatus.ERROR));
                     cb.onDone(false);
                     return;
                 }
                 emit(cb, "[확인] Python: " + python + " ✔");
                 if (pip == null) {
-                    emit(cb, "[경고] pip가 PATH에 없습니다. pip 또는 pip3을 먼저 설치하세요.");
+                    emit(cb, "[오류] pip를 찾을 수 없습니다.");
+                    emit(cb, "메뉴 [설정 > 필요 라이브러리 설치]에서 Python 3을 설치한 뒤 다시 시도하세요.");
                     Platform.runLater(() -> instance.setStatus(ServiceStatus.ERROR));
                     cb.onDone(false);
                     return;
@@ -223,6 +226,8 @@ public class InstallationService {
             if (workDir != null && !workDir.isBlank()) {
                 pb.directory(new File(workDir));
             }
+            // 설치 직후 PATH 미반영 케이스 — 셸이 pip/python 등을 찾도록 알려진 도구 경로 추가
+            ToolLocator.augmentPath(pb.environment());
             pb.redirectErrorStream(true);
             Process process = pb.start();
 
@@ -243,42 +248,5 @@ public class InstallationService {
 
     private void emit(ProgressCallback cb, String msg) {
         cb.onLog(msg);
-    }
-
-    /**
-     * PATH에서 사용 가능한 python 실행 파일 이름을 반환한다.
-     *
-     * @return "python3" 또는 "python", 없으면 null
-     */
-    private String resolvePython() {
-        for (String candidate : new String[]{"python3", "python"}) {
-            if (runSilent(candidate + " --version")) return candidate;
-        }
-        return null;
-    }
-
-    /**
-     * PATH에서 사용 가능한 pip 실행 파일 이름을 반환한다.
-     *
-     * @return "pip3" 또는 "pip", 없으면 null
-     */
-    private String resolvePip() {
-        for (String candidate : new String[]{"pip3", "pip"}) {
-            if (runSilent(candidate + " --version")) return candidate;
-        }
-        return null;
-    }
-
-    private boolean runSilent(String command) {
-        try {
-            String[] cmd = PlatformUtil.isWindows()
-                    ? new String[]{"cmd.exe", "/c", command}
-                    : new String[]{"bash", "-c", command};
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            p.getInputStream().transferTo(OutputStream.nullOutputStream());
-            return p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0;
-        } catch (Exception e) {
-            return false;
-        }
     }
 }

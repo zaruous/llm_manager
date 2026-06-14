@@ -11,6 +11,7 @@ import org.kyj.llmmanager.service.PluginManager;
 import org.kyj.llmmanager.service.SystemMonitorService;
 import org.kyj.llmmanager.setup.SetupCheckDialog;
 import org.kyj.llmmanager.util.PlatformUtil;
+import org.kyj.llmmanager.util.ToolLocator;
 import org.kyj.llmmanager.ui.cell.ServiceListCell;
 import org.kyj.llmmanager.ui.dialog.ServiceDetailDialog;
 import org.kyj.llmmanager.util.CommandBuilder;
@@ -382,7 +383,42 @@ public class MainController implements Initializable {
     @FXML
     private void onStart() {
         if (selectedInstance == null) return;
-        ctx.getProcessManager().start(selectedInstance);
+        startServiceChecked(selectedInstance);
+    }
+
+    /**
+     * 런타임 의존성을 확인한 뒤 서비스를 시작한다.
+     * PYTHON 런타임 서비스인데 Python 3을 찾지 못하면 설치 화면 이동을 안내하고 시작을 중단한다.
+     *
+     * @param inst 시작할 서비스 인스턴스
+     */
+    private void startServiceChecked(ServiceInstance inst) {
+        ServiceDefinition def = inst.getDefinition();
+        if (def.getRuntimeType() != RuntimeType.PYTHON
+                || ToolLocator.resolveCommand("python") != null) {
+            ctx.getProcessManager().start(inst);
+            return;
+        }
+
+        // 설치 스크립트가 PowerShell 기반이라 Windows 외 OS는 수동 설치 안내만 표시
+        if (!PlatformUtil.isWindows()) {
+            new Alert(Alert.AlertType.WARNING,
+                    def.getName() + " 서비스는 Python 3 런타임이 필요합니다.\n"
+                            + "python3 설치 후 다시 시도하세요.").showAndWait();
+            return;
+        }
+
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Python 미설치");
+        alert.setHeaderText(def.getName() + " 서비스는 Python 3 런타임이 필요합니다.");
+        alert.setContentText("설치 화면을 열어 Python 3을 설치하시겠습니까?");
+        if (alert.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) return;
+
+        new SetupCheckDialog().showAndWait();
+        // 설치를 마치고 돌아왔으면 재확인 후 바로 시작
+        if (ToolLocator.resolveCommand("python") != null) {
+            ctx.getProcessManager().start(inst);
+        }
     }
 
     @FXML
@@ -1272,7 +1308,7 @@ public class MainController implements Initializable {
             } else if (inst.getStatus() == ServiceStatus.STOPPED
                     || inst.getStatus() == ServiceStatus.INSTALLED
                     || inst.getStatus() == ServiceStatus.ERROR) {
-                ctx.getProcessManager().start(inst);
+                startServiceChecked(inst);
             }
         });
 

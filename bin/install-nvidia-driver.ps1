@@ -46,19 +46,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# Callers (e.g. the Java setup dialog) read our output as UTF-8;
-# Windows PowerShell 5.1 defaults to the OEM codepage, so force UTF-8.
-try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
-
-# Authenticated corporate proxies (NTLM/Kerberos) return 407 for anonymous
-# requests; attach the Windows logon credentials to the system proxy.
-$defaultProxy = [System.Net.WebRequest]::DefaultWebProxy
-if ($defaultProxy) {
-    $defaultProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-}
-
-# Pre-staged installers placed here are used without downloading (air-gapped networks)
-$OFFLINE_DIR = Join-Path $env:USERPROFILE "llm-services\installers"
+# 공통 헬퍼 (출력·관리자 확인·프록시·다운로드·오프라인 폴백)
+. (Join-Path $PSScriptRoot 'installer-common.ps1')
 
 # ─────────────────────────────────────────────────────────────
 # Constants
@@ -144,20 +133,8 @@ $GPU_PFID_MAP = [ordered]@{
 }
 
 # ─────────────────────────────────────────────────────────────
-# Utility functions
+# Utility functions (common helpers come from installer-common.ps1)
 # ─────────────────────────────────────────────────────────────
-
-function Write-Step  { param([string]$m) Write-Host "`n[*] $m" -ForegroundColor Cyan }
-function Write-Ok    { param([string]$m) Write-Host "    [OK] $m" -ForegroundColor Green }
-function Write-Warn  { param([string]$m) Write-Host "    [!!] $m" -ForegroundColor Yellow }
-function Write-Fail  { param([string]$m) Write-Host "    [XX] $m" -ForegroundColor Red }
-function Write-Info  { param([string]$m) Write-Host "         $m" -ForegroundColor DarkGray }
-
-function Test-Admin {
-    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-    ([Security.Principal.WindowsPrincipal]$id).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]::Administrator)
-}
 
 function Get-DriverVersionFromString {
     param([string]$raw)
@@ -165,44 +142,11 @@ function Get-DriverVersionFromString {
     return $null
 }
 
-function Get-EnvProxy {
-    foreach ($name in @('HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy')) {
-        $v = [Environment]::GetEnvironmentVariable($name)
-        if ($v) { return $v }
-    }
-    return $null
-}
-
-function Find-OfflineInstaller {
-    param([string]$Pattern)
-    if (-not (Test-Path $OFFLINE_DIR)) { return $null }
-    $f = Get-ChildItem $OFFLINE_DIR -Filter $Pattern -File -ErrorAction SilentlyContinue |
-         Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($f) { return $f.FullName }
-    return $null
-}
-
 function Download-File {
     param([string]$Url, [string]$Dest)
     Write-Info "URL : $Url"
     Write-Info "Dest: $Dest"
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $iwrParams = @{ Uri = $Url; OutFile = $Dest; UseBasicParsing = $true }
-    # HTTP(S)_PROXY environment variables take precedence over the system proxy
-    $envProxy = Get-EnvProxy
-    if ($envProxy) {
-        $iwrParams.Proxy = $envProxy
-        $iwrParams.ProxyUseDefaultCredentials = $true
-    }
-    # PS 5.1's Invoke-WebRequest progress bar slows downloads drastically — disable it
-    $prevProgress = $ProgressPreference
-    $ProgressPreference = 'SilentlyContinue'
-    try {
-        Invoke-WebRequest @iwrParams
-    } finally {
-        $ProgressPreference = $prevProgress
-    }
-    if (-not (Test-Path $Dest)) { throw "Download failed: file not found after download" }
+    Invoke-Download -Url $Url -Dest $Dest
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -268,6 +212,17 @@ if (-not $gpu) { $gpu = $gpuList | Select-Object -First 1 }
 $gpuName   = $gpu.Name.Trim()
 $gpuRamGB  = [math]::Round($gpu.AdapterRAM / 1GB, 1)
 $gpuDriver = $gpu.DriverVersion
+
+# WMI AdapterRAM is uint32 and caps at 4 GB — use nvidia-smi for the real VRAM size when available
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    try {
+        $vramMiB = (& nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null |
+                    Select-Object -First 1).ToString().Trim()
+        if ($vramMiB -match '^\d+$') {
+            $gpuRamGB = [math]::Round([double]$vramMiB / 1024, 1)
+        }
+    } catch { }
+}
 
 $devIdMatch = $gpu.PNPDeviceID -match "DEV_([0-9A-F]{4})"
 $deviceId   = if ($devIdMatch) { $Matches[1] } else { "Unknown" }
@@ -395,7 +350,7 @@ if (-not $SkipDriver) {
     if (-not $latestDriverDownUrl -and -not $offlineDriver) {
         Write-Warn "Automatic driver URL lookup failed."
         Write-Warn "If behind a proxy or air-gapped, download the driver manually and either:"
-        Write-Host "  - place it at $OFFLINE_DIR\nvidia-driver-<version>.exe and re-run, or" -ForegroundColor Cyan
+        Write-Host "  - place it at $OfflineDir\nvidia-driver-<version>.exe and re-run, or" -ForegroundColor Cyan
         Write-Host "  - use -SkipDriver to install CUDA only." -ForegroundColor Cyan
         Write-Host ""
         Write-Host "  https://www.nvidia.com/Download/index.aspx" -ForegroundColor Cyan
@@ -446,7 +401,7 @@ if (-not $SkipDriver) {
                     Write-Ok "Download complete: $drvTemp"
                 } catch {
                     Write-Fail "Driver download failed: $_"
-                    Write-Warn "Download manually and place it at $OFFLINE_DIR\nvidia-driver-<version>.exe, or use -SkipDriver."
+                    Write-Warn "Download manually and place it at $OfflineDir\nvidia-driver-<version>.exe, or use -SkipDriver."
                     $drvTemp = $null
                 }
             }
@@ -542,7 +497,7 @@ if (-not $SkipCuda) {
                         Write-Fail "CUDA download failed: $_"
                         Write-Warn "If behind a proxy or air-gapped:"
                         Write-Host "  1. Download on another PC: $cudaUrl" -ForegroundColor Cyan
-                        Write-Host "  2. Place the file at    : $OFFLINE_DIR\$cudaFileName" -ForegroundColor Cyan
+                        Write-Host "  2. Place the file at    : $OfflineDir\$cudaFileName" -ForegroundColor Cyan
                         Write-Host "  3. Run install again." -ForegroundColor Cyan
                         $cudaTemp = $null
                     }

@@ -7,6 +7,7 @@ package org.kyj.llmmanager.service;
 import org.kyj.llmmanager.model.*;
 import org.kyj.llmmanager.util.CommandBuilder;
 import org.kyj.llmmanager.util.PlatformUtil;
+import org.kyj.llmmanager.util.ToolLocator;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,6 +108,25 @@ public class ProcessManager {
                 }
             }
 
+            // PYTHON 런타임이면 시작 전 Python 가용성 확인 — 미설치 시 안내 후 중단.
+            // ToolLocator가 설치 직후 PATH 미반영 케이스도 알려진 경로 폴백으로 처리한다.
+            if (def.getRuntimeType() == RuntimeType.PYTHON) {
+                String python = ToolLocator.resolveCommand("python");
+                if (python == null) {
+                    logService.addSystemLog(instance, "오류: Python 3을 찾을 수 없습니다.");
+                    logService.addSystemLog(instance,
+                            "메뉴 [설정 > 필요 라이브러리 설치]에서 Python 3을 설치한 뒤 다시 시작해 주세요.");
+                    setStatus(instance, ServiceStatus.ERROR);
+                    return;
+                }
+                // 직접 exec는 부모 PATH로 명령을 찾으므로, bare python(3)을 확인된 명령으로 치환
+                String exe = tokens.get(0);
+                if (exe.equalsIgnoreCase("python") || exe.equalsIgnoreCase("python3")
+                        || exe.equalsIgnoreCase("python.exe")) {
+                    tokens.set(0, python);
+                }
+            }
+
             ProcessBuilder pb = new ProcessBuilder(tokens);
             if (workDir != null && !workDir.isBlank()) {
                 File dir = new File(workDir);
@@ -120,6 +140,8 @@ public class ProcessManager {
                 }
                 pb.directory(dir);
             }
+            // 설치 직후 PATH 미반영 케이스 — 자식 프로세스가 pip 등 도구를 찾도록 알려진 경로 추가
+            ToolLocator.augmentPath(pb.environment());
             pb.environment().putAll(def.getEnvVars());
             pb.redirectErrorStream(false);
 
