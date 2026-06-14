@@ -20,6 +20,13 @@ tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
 }
 
+// app.properties의 ${version} 플레이스홀더를 빌드 시점에 실제 버전으로 치환
+processResources {
+    filesMatching('**/app.properties') {
+        expand(version: project.version)
+    }
+}
+
 repositories {
     mavenCentral()
 }
