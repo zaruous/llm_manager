@@ -24,9 +24,12 @@ import org.kyj.llmmanager.ui.dialog.HelpDialog;
 import org.kyj.llmmanager.ui.dialog.PluginCommandRunDialog;
 import org.kyj.llmmanager.ui.dialog.PluginManagerDialog;
 import org.kyj.llmmanager.ui.dialog.SettingsDialog;
+import org.kyj.llmmanager.ui.dialog.UpdateInstallDialog;
 import org.kyj.llmmanager.ui.dialog.WikiBrowserDialog;
 import org.kyj.llmmanager.ui.dialog.WikiIngestDialog;
 import org.kyj.llmmanager.ui.dialog.WikiQueryDialog;
+import org.kyj.llmmanager.service.UpdateChecker;
+import javafx.concurrent.Task;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
@@ -967,6 +970,37 @@ public class MainController implements Initializable {
     @FXML
     private void onSettings() {
         new SettingsDialog((Stage) menuBar.getScene().getWindow()).showAndWait();
+    }
+
+    /**
+     * GitHub Releases를 조회해 새 버전이 있으면 UpdateInstallDialog를 표시한다.
+     * 조회는 백그라운드 스레드에서 실행하고 결과는 FX 스레드에서 처리한다.
+     */
+    @FXML
+    private void onCheckUpdate() {
+        Stage owner = (Stage) menuBar.getScene().getWindow();
+        UpdateChecker checker = UpdateChecker.fromProperties();
+
+        Task<java.util.Optional<UpdateChecker.UpdateInfo>> task = new Task<>() {
+            @Override
+            protected java.util.Optional<UpdateChecker.UpdateInfo> call() throws Exception {
+                return checker.checkForUpdate();
+            }
+        };
+        task.setOnSucceeded(e -> {
+            java.util.Optional<UpdateChecker.UpdateInfo> info = task.getValue();
+            if (info.isEmpty()) {
+                new Alert(Alert.AlertType.INFORMATION,
+                        "현재 최신 버전입니다 (v" + checker.getCurrentVersion() + ").").showAndWait();
+            } else {
+                new UpdateInstallDialog(owner, info.get(), checker.getCurrentVersion()).show();
+            }
+        });
+        task.setOnFailed(e ->
+                new Alert(Alert.AlertType.ERROR,
+                        "업데이트 확인 실패: " + task.getException().getMessage()).showAndWait());
+
+        new Thread(task, "update-checker").start();
     }
 
     /**

@@ -35,6 +35,8 @@
                 <MenuItem text="환경설정"     onAction="#onSettings"      accelerator="Ctrl+Comma"/>
                 <SeparatorMenuItem/>
                 <MenuItem text="필요 라이브러리 설치" onAction="#onSetupCheck"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="업데이트 확인" onAction="#onCheckUpdate"/>
             </Menu>
             <Menu text="도움말">
                 <MenuItem text="도움말 보기"  onAction="#onHelp"          accelerator="F1"/>
