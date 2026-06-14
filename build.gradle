@@ -56,6 +56,9 @@ dependencies {
     implementation 'io.javalin:javalin:6.3.0'
     // 시스템 리소스 모니터링 (CPU·메모리·OS 정보)
     implementation 'com.github.oshi:oshi-core:6.6.1'
+    implementation 'org.commonmark:commonmark:0.22.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-tables:0.22.0'
+    implementation 'org.commonmark:commonmark-ext-autolink:0.22.0'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:6.0.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

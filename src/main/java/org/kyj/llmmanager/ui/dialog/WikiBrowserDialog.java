@@ -6,6 +6,7 @@ package org.kyj.llmmanager.ui.dialog;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kyj.llmmanager.AppContext;
+import org.kyj.llmmanager.service.WikiMarkdownUtils;
 import org.kyj.llmmanager.util.SceneFactory;
 
 import javafx.application.Platform;
@@ -20,7 +21,6 @@ import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.web.WebView;
 import javafx.stage.DirectoryChooser;
@@ -43,7 +43,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 /**
  * 위키 워크스페이스를 탐색하는 브라우저 창 (통합계획 Phase 3).
@@ -141,9 +140,16 @@ public class WikiBrowserDialog {
         refreshBtn.setOnAction(e -> openWorkspace(workspaceField.getText()));
         Button graphBtn = new Button("그래프");
         graphBtn.setOnAction(e -> openGraphInBrowser());
-
+        Button exportBtn = new Button("HTML 내보내기");
+        exportBtn.setOnAction(e -> {
+            if (workspace == null) {
+                renderMessage("워크스페이스를 먼저 선택해 주세요.");
+                return;
+            }
+            new WikiExportDialog(stage, workspace).show();
+        });
         HBox topBar = new HBox(8, new Label("워크스페이스:"), workspaceField, browseBtn,
-                backBtn, refreshBtn, graphBtn);
+                backBtn, refreshBtn, graphBtn, exportBtn);
         topBar.setAlignment(Pos.CENTER_LEFT);
         topBar.setPadding(new Insets(10, 12, 10, 12));
         HBox.setHgrow(workspaceField, Priority.ALWAYS);
@@ -252,7 +258,7 @@ public class WikiBrowserDialog {
         for (String name : List.of("overview.md", "index.md", "log.md")) {
             Path file = wikiDir.resolve(name);
             if (Files.isRegularFile(file)) {
-                docs.getChildren().add(new TreeItem<>(new PageNode(stem(name), file)));
+                docs.getChildren().add(new TreeItem<>(new PageNode(WikiMarkdownUtils.stem(name), file)));
                 indexPage(file);
                 allPages.add(file);
             }
@@ -262,11 +268,11 @@ public class WikiBrowserDialog {
         // 카테고리별 페이지
         for (String category : CATEGORIES) {
             Path catDir = wikiDir.resolve(category);
-            List<Path> pages = listMarkdown(catDir);
+            List<Path> pages = WikiMarkdownUtils.listMarkdown(catDir);
             TreeItem<PageNode> catItem = new TreeItem<>(
                     new PageNode(category + " (" + pages.size() + ")", null));
             for (Path page : pages) {
-                catItem.getChildren().add(new TreeItem<>(new PageNode(stem(page), page)));
+                catItem.getChildren().add(new TreeItem<>(new PageNode(WikiMarkdownUtils.stem(page), page)));
                 indexPage(page);
                 allPages.add(page);
             }
@@ -278,7 +284,7 @@ public class WikiBrowserDialog {
         for (String name : List.of("health-report.md", "lint-report.md")) {
             Path file = wikiDir.resolve(name);
             if (Files.isRegularFile(file)) {
-                reports.getChildren().add(new TreeItem<>(new PageNode(stem(name), file)));
+                reports.getChildren().add(new TreeItem<>(new PageNode(WikiMarkdownUtils.stem(name), file)));
                 allPages.add(file);
             }
         }
@@ -291,54 +297,12 @@ public class WikiBrowserDialog {
         navigateTo(Files.isRegularFile(overview) ? overview : wikiDir.resolve("index.md"), true);
     }
 
-    private List<Path> listMarkdown(Path dir) {
-        if (!Files.isDirectory(dir)) return List.of();
-        try (Stream<Path> stream = Files.list(dir)) {
-            return new ArrayList<>(stream
-                    .filter(p -> p.getFileName().toString().endsWith(".md"))
-                    .sorted()
-                    .toList());
-        } catch (Exception e) {
-            return List.of();
-        }
-    }
-
     /** 파일명 스템과 frontmatter title 양쪽 키로 페이지를 색인한다 — 위키링크는 제목 기준이 많다. */
     private void indexPage(Path file) {
-        pageIndex.put(normalizeKey(stem(file)), file);
-        String title = readFrontmatterValue(file, "title");
-        if (title != null && !title.isBlank()) {
-            pageIndex.put(normalizeKey(title), file);
-        }
-    }
-
-    private String stem(Path file) {
-        return stem(file.getFileName().toString());
-    }
-
-    private String stem(String fileName) {
-        return fileName.endsWith(".md") ? fileName.substring(0, fileName.length() - 3) : fileName;
-    }
-
-    /** 대소문자·공백·하이픈 차이를 무시하는 링크 매칭 키 */
-    private String normalizeKey(String name) {
-        return name.toLowerCase(Locale.ROOT).replace('-', ' ').replace('_', ' ').trim();
-    }
-
-    private String readFrontmatterValue(Path file, String key) {
-        try {
-            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-            if (lines.isEmpty() || !lines.get(0).strip().equals("---")) return null;
-            for (int i = 1; i < Math.min(lines.size(), 20); i++) {
-                String line = lines.get(i).strip();
-                if (line.equals("---")) break;
-                if (line.startsWith(key + ":")) {
-                    return line.substring(key.length() + 1).trim().replaceAll("^\"|\"$", "");
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
+        pageIndex.put(WikiMarkdownUtils.normalizeKey(WikiMarkdownUtils.stem(file)), file);
+        String title = WikiMarkdownUtils.readFrontmatterValue(file, "title");
+        if (title != null && !title.isBlank())
+            pageIndex.put(WikiMarkdownUtils.normalizeKey(title), file);
     }
 
     // ─────────────────────────────────────────────
@@ -368,7 +332,7 @@ public class WikiBrowserDialog {
             List<PageNode> contentHits = new ArrayList<>();
             for (Path page : targets) {
                 try {
-                    String name = stem(page);
+                    String name = WikiMarkdownUtils.stem(page);
                     String label = name + "  ·  " + categoryOf(page);
                     if (name.toLowerCase(Locale.ROOT).contains(lower)) {
                         titleHits.add(new PageNode("★ " + label, page));
@@ -413,7 +377,7 @@ public class WikiBrowserDialog {
     // ─────────────────────────────────────────────
 
     private void navigateToName(String name) {
-        Path target = pageIndex.get(normalizeKey(name));
+        Path target = pageIndex.get(WikiMarkdownUtils.normalizeKey(name));
         if (target != null) navigateTo(target, true);
     }
 
@@ -441,7 +405,7 @@ public class WikiBrowserDialog {
         String fileName = relative.replace('\\', '/');
         int slash = fileName.lastIndexOf('/');
         if (slash >= 0) fileName = fileName.substring(slash + 1);
-        navigateToName(stem(fileName));
+        navigateToName(WikiMarkdownUtils.stem(fileName));
     }
 
     private void navigateTo(Path page, boolean pushHistory) {
@@ -461,30 +425,12 @@ public class WikiBrowserDialog {
     private void renderPage(Path page) {
         try {
             String md = Files.readString(page, StandardCharsets.UTF_8);
-            md = stripFrontmatterToMeta(md);
+            md = WikiMarkdownUtils.stripFrontmatterToMeta(md);
             md = convertWikiLinks(md);
             loadMarkdown(md);
         } catch (Exception e) {
             renderMessage("페이지를 읽을 수 없습니다: " + e.getMessage());
         }
-    }
-
-    /** frontmatter를 제거하고 type·last_updated만 인용구 메타 라인으로 남긴다. */
-    private String stripFrontmatterToMeta(String md) {
-        if (!md.startsWith("---")) return md;
-        int end = md.indexOf("\n---", 3);
-        if (end < 0) return md;
-        String frontmatter = md.substring(3, end);
-        String body = md.substring(md.indexOf('\n', end + 1) + 1);
-
-        List<String> meta = new ArrayList<>();
-        for (String line : frontmatter.split("\\R")) {
-            String stripped = line.strip();
-            if (stripped.startsWith("type:") || stripped.startsWith("last_updated:")) {
-                meta.add(stripped);
-            }
-        }
-        return meta.isEmpty() ? body : "> " + String.join(" · ", meta) + "\n\n" + body;
     }
 
     /**
@@ -498,7 +444,7 @@ public class WikiBrowserDialog {
             String name = matcher.group(1).trim();
             String label = matcher.group(2) != null ? matcher.group(2).trim() : name;
             String replacement;
-            if (pageIndex.containsKey(normalizeKey(name))) {
+            if (pageIndex.containsKey(WikiMarkdownUtils.normalizeKey(name))) {
                 replacement = "[" + label + "](wiki:"
                         + URLEncoder.encode(name, StandardCharsets.UTF_8) + ")";
             } else {
@@ -563,4 +509,5 @@ public class WikiBrowserDialog {
             return new String(is.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
+
 }

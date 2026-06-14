@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="__THEME__">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>__PAGE_TITLE__</title>
+  <link rel="stylesheet" href="__ASSET_BASE__style.css"/>
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">Wiki</span>
+        <button class="theme-btn" id="themeBtn" title="테마 전환">◑</button>
+      </div>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="검색..." autocomplete="off"/>
+      </div>
+      <div class="nav-tree" id="navTree">
+        __NAV_HTML__
+      </div>
+    </nav>
+    <main class="content">
+      <div class="toolbar">
+        <button class="print-btn" onclick="window.print()" title="PDF로 저장">🖨 PDF 저장</button>
+      </div>
+      <article id="content">
+        __CONTENT_HTML__
+      </article>
+    </main>
+  </div>
+  <script src="__ASSET_BASE__nav.js"></script>
+</body>
+</html>
