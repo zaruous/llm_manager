@@ -6,6 +6,7 @@ package org.kyj.llmmanager.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.kyj.llmmanager.model.ProcessRecord;
 import org.kyj.llmmanager.model.plugin.PluginCommand;
 import org.kyj.llmmanager.model.plugin.LoadedPlugin;
 import org.kyj.llmmanager.model.AppSettings;
@@ -16,13 +17,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 신뢰된 앱 내부 command handler를 호출하는 실행기.
@@ -36,9 +44,18 @@ public class PluginCommandExecutor {
     private final PluginManager pluginManager;
     private final AppSettingsRepository settingsRepository;
 
-    /** 실행 중인 프로세스 추적 (command id → 프로세스). 사용자 중지 요청에 사용. */
-    private final Map<String, Process> activeProcesses =
+    /** 실행 중인 프로세스 추적 (trackKey → 항목). 사용자 중지·레코드 갱신에 사용. */
+    private final Map<String, ActiveProcess> activeProcesses =
             new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 실행 중인 프로세스와 히스토리 레코드 파일을 묶어 추적하는 항목.
+     *
+     * @param process node 프로세스
+     * @param recordFile 히스토리 JSON 파일 경로
+     * @param startTime 프로세스 시작 시각
+     */
+    private record ActiveProcess(Process process, Path recordFile, Instant startTime) {}
 
     public PluginCommandExecutor(PluginManager pluginManager,
                                  AppSettingsRepository settingsRepository) {
@@ -84,7 +101,7 @@ public class PluginCommandExecutor {
                 return PluginCommandResult.error("작업 디렉토리가 존재하지 않습니다: " + cwdPath);
             }
         }
-        for (String env : effectiveRequiredEnv(command)) {
+        for (String env : command.getRequires().getEnv()) {
             String value = System.getenv(env);
             if (value == null || value.isBlank()) {
                 return PluginCommandResult.error("필수 환경변수가 없습니다: " + env);
@@ -108,9 +125,12 @@ public class PluginCommandExecutor {
      * @return 실행 중인 프로세스를 찾아 종료했으면 true
      */
     public boolean cancel(String commandId) {
-        Process process = activeProcesses.remove(commandId);
-        if (process == null || !process.isAlive()) return false;
-        destroyProcessTree(process);
+        ActiveProcess active = activeProcesses.remove(commandId);
+        if (active == null || !active.process().isAlive()) return false;
+        destroyProcessTree(active.process());
+        finalizeRecord(active.recordFile(), active.startTime(),
+                ProcessRecord.Status.CANCELLED, -1, "사용자 중지");
+        deletePidFile(commandId);
         return true;
     }
 
@@ -119,8 +139,8 @@ public class PluginCommandExecutor {
     // ─────────────────────────────────────────────
 
     /**
-     * wiki.* command를 처리한다. 플러그인 디렉토리의 tools/*.py를
-     * 위키 워크스페이스(cwd)에서 실행하고 출력을 스트리밍한다.
+     * wiki.* command를 처리한다. 위키 워크스페이스(cwd)를 검증한 뒤
+     * 작업을 Cursor Agent에 위임하고 출력을 스트리밍한다.
      *
      * @param pluginId wiki-agent 플러그인 ID
      * @param command 실행할 command manifest
@@ -155,178 +175,15 @@ public class PluginCommandExecutor {
                     + "\nLLM 스킬 설치에서 'LLM Wiki Agent > 위키 워크스페이스 골격' 팩을 먼저 설치해 주세요.");
         }
 
-        // 업스트림 도구는 wiki 경로를 스크립트 위치 기준(tools/..)으로 해석하므로
-        // 플러그인의 tools/를 워크스페이스로 동기화한 뒤 워크스페이스 사본을 실행한다
-        Path toolsDir;
+        // 그래프 빌드 등에서 에이전트가 활용할 수 있도록 플러그인 tools/를
+        // 워크스페이스로 동기화한다 (업스트림 도구는 스크립트 위치 기준으로 wiki 경로를 해석)
         try {
-            toolsDir = syncToolsIntoWorkspace(plugin.getDirectory().resolve("tools"), workspace);
+            syncToolsIntoWorkspace(plugin.getDirectory().resolve("tools"), workspace);
         } catch (Exception e) {
             return PluginCommandResult.error("도구 동기화 실패: " + e.getMessage());
         }
 
-        // 설정의 실행 에이전트가 cursor면 Python 대신 Cursor Agent에 작업을 위임
-        if (isWikiCursorAgent()) {
-            return runWikiViaCursorAgent(command, request, workspace, onOutput);
-        }
-
-        List<String> args = buildWikiToolArgs(command.getId(), toolsDir, request, workspace);
-        if (args == null) {
-            return PluginCommandResult.error("등록되지 않은 wiki command입니다: " + command.getId());
-        }
-        if (args.isEmpty()) {
-            // buildWikiToolArgs가 입력 검증 실패 메시지를 onOutput으로 보냈음
-            return PluginCommandResult.error("입력값을 확인해 주세요.");
-        }
-
-        AppSettings settings = settingsRepository.get();
-        String python = settings.getPythonCommand() == null || settings.getPythonCommand().isBlank()
-                ? "python" : settings.getPythonCommand().trim();
-
-        List<String> commandLine = new java.util.ArrayList<>();
-        commandLine.add(python);
-        commandLine.addAll(args);
-
-        try {
-            ProcessBuilder pb = new ProcessBuilder(commandLine);
-            pb.directory(workspace.toFile());
-            // stdout/stderr를 한 스트림으로 합쳐 CLI처럼 순서대로 노출
-            pb.redirectErrorStream(true);
-            applyAllowedEnvironment(pb.environment(), command.getRequires().getEnv());
-            // Windows 콘솔 인코딩 문제 방지 — Python 출력은 항상 UTF-8
-            pb.environment().put("PYTHONIOENCODING", "utf-8");
-            pb.environment().put("PYTHONUTF8", "1");
-            applyWikiModelEnv(pb.environment(), settings, pluginId);
-
-            onOutput.accept("$ " + String.join(" ", commandLine));
-            Process process = pb.start();
-            activeProcesses.put(command.getId(), process);
-            try {
-                StringBuilder output = new StringBuilder();
-                CompletableFuture<Void> stdoutFuture = CompletableFuture.runAsync(() -> {
-                    try (BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            output.append(line).append('\n');
-                            onOutput.accept(line);
-                        }
-                    } catch (Exception ignored) {
-                    }
-                });
-
-                Duration timeout = executionTimeout(pluginId);
-                boolean done = awaitProcess(process, timeout);
-                if (!done) {
-                    destroyProcessTree(process);
-                    return PluginCommandResult.error("Wiki 도구 실행 시간이 초과되었습니다. 제한: "
-                            + timeout.toMinutes() + "분 (설정 탭의 '실행 타임아웃'으로 조정 가능)");
-                }
-                stdoutFuture.get(5, TimeUnit.SECONDS);
-
-                if (process.exitValue() != 0) {
-                    String message = "Wiki 도구 실패 (exit=" + process.exitValue() + ")";
-                    // litellm 등 pip 의존성 미설치가 가장 흔한 실패 원인 — 설치 안내 추가
-                    if (output.toString().contains("No module named")) {
-                        message += "\nPython 의존성이 없습니다. 다음을 실행해 주세요: pip install litellm";
-                    }
-                    return PluginCommandResult.error(message);
-                }
-                return PluginCommandResult.info(output.toString().trim());
-            } finally {
-                activeProcesses.remove(command.getId(), process);
-            }
-        } catch (Exception e) {
-            return PluginCommandResult.error("Wiki 도구 실행 오류: " + e.getMessage());
-        }
-    }
-
-    /**
-     * command ID를 Python 도구 인자 목록으로 변환한다.
-     *
-     * @return null=미등록 command, 빈 목록=입력 검증 실패(사유는 onOutput으로 전달됨)
-     */
-    private List<String> buildWikiToolArgs(String commandId, Path toolsDir,
-                                           PluginCommandRequest request, Path workspace) {
-        String prompt = request.prompt() != null ? request.prompt().trim() : "";
-        switch (commandId) {
-            case "wiki.ingest": {
-                if (prompt.isBlank()) return List.of();
-                List<String> args = new java.util.ArrayList<>();
-                args.add(toolsDir.resolve("ingest.py").toString());
-                // prompt = 수집할 파일·디렉토리 경로 목록 (줄 단위)
-                for (String line : prompt.split("\\R")) {
-                    String path = line.trim();
-                    if (path.isBlank()) continue;
-                    Path resolved = Path.of(path);
-                    if (!resolved.isAbsolute()) resolved = workspace.resolve(path);
-                    args.add(resolved.toString());
-                }
-                return args.size() > 1 ? args : List.of();
-            }
-            case "wiki.query": {
-                if (prompt.isBlank()) return List.of();
-                List<String> args = new java.util.ArrayList<>();
-                args.add(toolsDir.resolve("query.py").toString());
-                args.add(prompt);
-                if ("true".equalsIgnoreCase(request.options().get("save"))) {
-                    // bare --save는 input()으로 파일명을 물어 비대화형 실행이 멈추므로
-                    // 타임스탬프 슬러그 경로를 항상 함께 전달한다
-                    args.add("--save");
-                    args.add("syntheses/query-" + java.time.LocalDateTime.now()
-                            .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-                            + ".md");
-                }
-                return args;
-            }
-            case "wiki.health":
-                return List.of(toolsDir.resolve("health.py").toString(), "--save");
-            case "wiki.lint":
-                return List.of(toolsDir.resolve("lint.py").toString(), "--save");
-            case "wiki.graph":
-                return List.of(toolsDir.resolve("build_graph.py").toString());
-            default:
-                return null;
-        }
-    }
-
-    /**
-     * 모델 환경변수를 프로세스에 주입한다. 우선순위: 시스템 환경변수 > 플러그인 설정 > 앱 기본값.
-     * 업스트림 도구의 내장 기본값(claude-3-5-*)은 retire된 모델이라 404가 나므로
-     * 항상 유효한 모델이 주입되도록 마지막 폴백을 둔다.
-     */
-    private void applyWikiModelEnv(Map<String, String> env, AppSettings settings, String pluginId) {
-        Map<String, String> fallbacks = Map.of(
-                "LLM_MODEL", "claude-sonnet-4-6",
-                "LLM_MODEL_FAST", "claude-haiku-4-5");
-        for (Map.Entry<String, String> entry : fallbacks.entrySet()) {
-            if (env.containsKey(entry.getKey())) continue;
-            String value = settings.getPluginSetting(pluginId, entry.getKey(), "");
-            env.put(entry.getKey(), value.isBlank() ? entry.getValue() : value);
-        }
-    }
-
-    /**
-     * command가 실제로 요구하는 환경변수 목록을 반환한다.
-     * 위키 커맨드는 실행 에이전트 설정에 따라 키가 달라진다 —
-     * python(litellm)은 ANTHROPIC_API_KEY, cursor 위임은 CURSOR_API_KEY.
-     */
-    private List<String> effectiveRequiredEnv(PluginCommand command) {
-        String id = command.getId();
-        if (id != null && id.startsWith("wiki.") && isWikiCursorAgent()) {
-            // UI 전용·로컬 커맨드는 에이전트와 무관하게 키 불필요
-            if ("wiki.browse".equals(id) || "wiki.openGraph".equals(id)) return List.of();
-            return List.of("CURSOR_API_KEY");
-        }
-        return command.getRequires().getEnv();
-    }
-
-    /**
-     * 위키 실행 에이전트 설정이 cursor인지 확인한다.
-     * 기본값은 claude (litellm + ANTHROPIC_API_KEY 경로).
-     */
-    private boolean isWikiCursorAgent() {
-        return "cursor".equalsIgnoreCase(
-                settingsRepository.get().getPluginSetting("wiki-agent", "wiki.agent", "claude"));
+        return runWikiViaCursorAgent(command, request, workspace, onOutput);
     }
 
     /**
@@ -353,8 +210,7 @@ public class PluginCommandExecutor {
         PluginCommand cursorCommand = findCursorRunAgentCommand();
         if (cursorCommand == null) {
             return PluginCommandResult.error(
-                    "Cursor Agent Runner 플러그인이 없습니다. 실행 에이전트를 python으로 바꾸거나 "
-                    + "cursor-agent-runner 플러그인을 설치해 주세요.");
+                    "Cursor Agent Runner 플러그인이 없습니다. cursor-agent-runner 플러그인을 설치해 주세요.");
         }
 
         String prompt = buildWikiAgentPrompt(command.getId(), request);
@@ -372,6 +228,76 @@ public class PluginCommandExecutor {
                 new PluginCommandRequest(workspace.toString(), prompt, model, mode,
                         new LinkedHashMap<>()),
                 onOutput, command.getId());
+    }
+
+    /**
+     * ingest 작업 모드별 위임 프롬프트를 조립한다. 모드는 WikiIngestPlanner가
+     * 작업 분해 시 결정한다 — batch(기본)=파일 목록 일괄 수집,
+     * section/merge=큰 텍스트 파일의 섹션 노트·병합 패스,
+     * pages=전처리된 PDF 페이지 이미지를 일차 소스로 판독하는 노트 패스,
+     * large=전처리 불가 바이너리를 에이전트가 내부 단계(변환→노트→병합)로 처리.
+     *
+     * @param payload 모드별 본문 (배치=파일 목록, 섹션=섹션 파일, 병합=노트 파일 경로)
+     * @param options ingestMode와 모드별 파라미터 (source, notes, staging 등)
+     */
+    private String buildIngestPrompt(String payload, Map<String, String> options) {
+        String mode = options.getOrDefault("ingestMode", "batch");
+        switch (mode) {
+            case "section":
+                return "Large-document ingest — note-taking pass " + options.get("sectionIndex")
+                        + " of " + options.get("sectionTotal")
+                        + " for source '" + options.get("source") + "'. "
+                        + "Read ONLY this section file: " + payload + " — then append structured "
+                        + "notes (key claims, entities, concepts, notable quotes, contradictions "
+                        + "with earlier sections' notes) under a heading '## Section "
+                        + options.get("sectionIndex") + "/" + options.get("sectionTotal")
+                        + "' to '" + options.get("notes") + "' (create the file if missing). "
+                        + "Do NOT create or update any wiki pages in this pass.";
+            case "pages":
+                return "Large-document ingest — page-reading pass for pages "
+                        + options.get("pageRange") + " of " + options.get("pageTotal")
+                        + " from source '" + options.get("source") + "'. "
+                        + "For EACH page listed below: open the page image file and read it "
+                        + "visually — the image is the primary source of truth; the extracted "
+                        + "text file is a supplement and may be incomplete or empty for "
+                        + "scanned/graphic pages (marked image-only). Then append structured "
+                        + "notes (key claims, entities, concepts, figures/tables described, "
+                        + "notable quotes, contradictions with earlier notes) under a heading "
+                        + "'## Pages " + options.get("pageRange") + "' to '" + options.get("notes")
+                        + "' (create the file if missing). If you cannot view images, rely on "
+                        + "the text files and mark unreadable pages as [unread image page]. "
+                        + "Do NOT create or update any wiki pages in this pass.\n" + payload;
+            case "merge":
+                return "Large-document ingest — final merge pass for source '"
+                        + options.get("source") + "'. The document was read in sections and the "
+                        + "accumulated notes are in: " + payload + ". Using those notes as the "
+                        + "content basis, perform the full ingest workflow from AGENTS.md "
+                        + "(source page, index, overview, entity/concept pages, contradictions, "
+                        + "log, post-ingest validation). Set source_file to '"
+                        + options.get("source") + "'.";
+            case "large":
+                return "Follow the wiki workflow defined in AGENTS.md to ingest this large file: "
+                        + payload + " — it is too large for a single reading pass, so work in "
+                        + "stages: (1) if it is not markdown, convert it first — try "
+                        + "`python tools/file_to_md.py <directory>` (markitdown wrapper, no LLM "
+                        + "calls) — placing results under '" + options.get("staging") + "'; "
+                        + "(2) read the markdown section by section, appending structured notes "
+                        + "per section to '" + options.get("notes") + "'; "
+                        + "(3) after all sections are noted, perform the full AGENTS.md ingest "
+                        + "workflow from the notes with source_file set to '" + payload + "'. "
+                        + "If conversion fails, ingest what you can extract and record the "
+                        + "limitation on the source page.";
+            default:
+                // 멱등 스킵: 작업 재시도 시 이미 수집된 파일을 다시 수집하지 않도록 지시.
+                // 변환 힌트: PDF 등 바이너리를 직접 못 읽을 때 동기화된 도구를 쓸 수 있게 안내.
+                return "Follow the wiki workflow defined in AGENTS.md. "
+                        + "Ingest the following source files into the wiki. "
+                        + "If a file was already ingested (its wiki/sources/ page exists "
+                        + "and is up to date), skip it and report it as skipped. "
+                        + "If you cannot read a non-markdown file directly, convert it first "
+                        + "by running `python tools/file_to_md.py <directory>` "
+                        + "(markitdown wrapper, no LLM calls):\n" + payload;
+        }
     }
 
     /** 로드된 cursor-agent-runner 플러그인에서 cursor.runAgent command를 찾는다. */
@@ -405,11 +331,9 @@ public class PluginCommandExecutor {
     private String buildWikiAgentPrompt(String commandId, PluginCommandRequest request) {
         String prompt = request.prompt() != null ? request.prompt().trim() : "";
         switch (commandId) {
-            case "wiki.ingest": {
+            case "wiki.ingest":
                 if (prompt.isBlank()) return null;
-                return "Follow the wiki workflow defined in AGENTS.md. "
-                        + "Ingest the following source files into the wiki:\n" + prompt;
-            }
+                return buildIngestPrompt(prompt, request.options());
             case "wiki.query": {
                 if (prompt.isBlank()) return null;
                 String save = "true".equalsIgnoreCase(request.options().get("save"))
@@ -516,8 +440,18 @@ public class PluginCommandExecutor {
             pb.environment().put("LLM_MANAGER_STREAM", "1");
 
             Duration timeout = executionTimeout(pluginId);
+            Instant startTime = Instant.now();
             Process process = pb.start();
-            activeProcesses.put(trackKey, process);
+            Path recordFile = createRecord(trackKey, process, command.getId(),
+                    request.cwd(), request.prompt());
+            activeProcesses.put(trackKey, new ActiveProcess(process, recordFile, startTime));
+            writePidFile(trackKey, process, command.getId(), request.cwd());
+
+            // 종료 정보 — finally 블록에서 레코드를 갱신하기 위해 스코프 밖에 선언
+            ProcessRecord.Status finalStatus = ProcessRecord.Status.FAILED;
+            int finalExitCode = -1;
+            String finalResult = null;
+
             try {
                 StringBuilder stdout = new StringBuilder();
                 CompletableFuture<Void> stdoutFuture = readStdoutStreaming(process, stdout, onOutput);
@@ -525,6 +459,8 @@ public class PluginCommandExecutor {
                 boolean done = awaitProcess(process, timeout);
                 if (!done) {
                     destroyProcessTree(process);
+                    finalStatus = ProcessRecord.Status.TIMEOUT;
+                    finalResult = "실행 시간 초과: " + timeout.toMinutes() + "분";
                     String stderr = stderrFuture.getNow("");
                     return PluginCommandResult.error(
                             "Cursor sidecar 실행 시간이 초과되었습니다. 제한: "
@@ -535,6 +471,9 @@ public class PluginCommandExecutor {
                 stdoutFuture.get(5, TimeUnit.SECONDS);
                 String stderr = stderrFuture.get(5, TimeUnit.SECONDS);
                 if (process.exitValue() != 0) {
+                    finalExitCode = process.exitValue();
+                    finalResult = stderr.isBlank()
+                            ? "exit=" + process.exitValue() : stderr.trim();
                     return PluginCommandResult.error(stderr.isBlank()
                             ? "Cursor sidecar 실패(exit=" + process.exitValue() + ")"
                             : stderr.trim());
@@ -547,9 +486,17 @@ public class PluginCommandExecutor {
                 String message = response != null
                         ? response.path("message").asText("")
                         : stdout.toString().trim();
+                finalStatus = success ? ProcessRecord.Status.COMPLETED : ProcessRecord.Status.FAILED;
+                finalExitCode = process.exitValue();
+                finalResult = message;
                 return new PluginCommandResult(success, message);
             } finally {
-                activeProcesses.remove(trackKey, process);
+                // cancel()이 먼저 remove했으면 null — 이미 CANCELLED로 기록됐으므로 skip
+                ActiveProcess removed = activeProcesses.remove(trackKey);
+                if (removed != null) {
+                    finalizeRecord(recordFile, startTime, finalStatus, finalExitCode, finalResult);
+                }
+                deletePidFile(trackKey);
             }
         } catch (Exception e) {
             return PluginCommandResult.error("Cursor sidecar 실행 오류: " + e.getMessage());
@@ -594,6 +541,138 @@ public class PluginCommandExecutor {
     private void destroyProcessTree(Process process) {
         process.descendants().forEach(ProcessHandle::destroyForcibly);
         process.destroyForcibly();
+    }
+
+    /**
+     * 실행 시작 시 RUNNING 상태의 히스토리 레코드 JSON을 생성하고 파일 경로를 반환한다.
+     * 파일명: records/<safeName>-<yyyyMMddHHmmssSSS>.json
+     * 실패해도 null을 반환하며 수집 흐름을 막지 않는다.
+     *
+     * @param trackKey 추적 키
+     * @param process 실행된 node 프로세스
+     * @param commandId 실행된 command id
+     * @param cwd 워크스페이스 경로
+     * @param prompt 전달된 프롬프트 원문 (요약해 저장)
+     * @return 생성된 레코드 파일 경로, 실패 시 null
+     */
+    private Path createRecord(String trackKey, Process process,
+                               String commandId, String cwd, String prompt) {
+        try {
+            Path dir = recordsDir();
+            Files.createDirectories(dir);
+            String ts = LocalDateTime.now()
+                    .format(DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS"));
+            String safeName = trackKey.replaceAll("[^a-zA-Z0-9._-]", "-");
+            Path recordFile = dir.resolve(safeName + "-" + ts + ".json");
+            ProcessRecord record = ProcessRecord.running(
+                    process.pid(), trackKey, commandId, cwd,
+                    summarizePrompt(prompt),
+                    LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            mapper.writerWithDefaultPrettyPrinter().writeValue(recordFile.toFile(), record);
+            return recordFile;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * 프로세스 종료 시 레코드 JSON을 최종 상태로 갱신한다.
+     * 파일이 없거나 쓰기에 실패해도 무시한다.
+     *
+     * @param recordFile createRecord()가 반환한 파일 경로
+     * @param startTime 프로세스 시작 시각
+     * @param status 최종 상태
+     * @param exitCode 프로세스 종료 코드
+     * @param result 최종 결과 메시지 (null 가능)
+     */
+    private void finalizeRecord(Path recordFile, Instant startTime,
+                                 ProcessRecord.Status status, int exitCode, String result) {
+        if (recordFile == null || !Files.isRegularFile(recordFile)) return;
+        try {
+            ProcessRecord existing = mapper.readValue(recordFile.toFile(), ProcessRecord.class);
+            long durationMs = Instant.now().toEpochMilli() - startTime.toEpochMilli();
+            String endTime = LocalDateTime.now()
+                    .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            ProcessRecord updated = existing.finalize(status, exitCode, result, endTime, durationMs);
+            mapper.writerWithDefaultPrettyPrinter().writeValue(recordFile.toFile(), updated);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * 최근 실행 레코드를 최신순으로 읽는다. UI의 히스토리 목록에 사용한다.
+     *
+     * @param limit 최대 반환 건수
+     * @return 최신순 레코드 목록
+     */
+    public List<ProcessRecord> readRecentRecords(int limit) {
+        Path dir = recordsDir();
+        if (!Files.isDirectory(dir)) return List.of();
+        try (Stream<Path> files = Files.list(dir)) {
+            return files
+                    .filter(f -> f.getFileName().toString().endsWith(".json"))
+                    .sorted(Comparator.comparing(Path::getFileName).reversed())
+                    .limit(limit)
+                    .map(f -> {
+                        try {
+                            return mapper.readValue(f.toFile(), ProcessRecord.class);
+                        } catch (Exception ignored) {
+                            return null;
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** 히스토리 레코드 저장 디렉토리. */
+    private Path recordsDir() {
+        return Path.of(System.getProperty("java.io.tmpdir"))
+                .resolve("llm-manager")
+                .resolve("records");
+    }
+
+    /**
+     * 실행 중인 node 프로세스의 PID를 임시 파일로 기록한다.
+     * 외부 도구(Task Manager 스크립트 등)가 실행 중인 프로세스를 식별하는 데 사용.
+     * 경로: %TEMP%/llm-manager/<trackKey>.pid
+     */
+    private void writePidFile(String trackKey, Process process,
+                               String commandId, String cwd) {
+        try {
+            Path pidFile = pidFilePath(trackKey);
+            Files.createDirectories(pidFile.getParent());
+            String content = "pid=" + process.pid() + "\n"
+                    + "command=" + commandId + "\n"
+                    + "cwd=" + cwd + "\n";
+            Files.writeString(pidFile, content, StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** PID 파일을 삭제한다. 프로세스 정상 종료·취소·타임아웃 시 공통 호출. */
+    private void deletePidFile(String trackKey) {
+        try {
+            Files.deleteIfExists(pidFilePath(trackKey));
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** trackKey를 파일명으로 변환한다 — '/'·':' 등 경로 금지 문자를 '-'로 치환. */
+    private Path pidFilePath(String trackKey) {
+        String safeName = trackKey.replaceAll("[^a-zA-Z0-9._-]", "-");
+        return Path.of(System.getProperty("java.io.tmpdir"))
+                .resolve("llm-manager")
+                .resolve(safeName + ".pid");
+    }
+
+    /** 프롬프트 앞 200자만 요약한다 — 전문은 레코드 파일을 비대하게 만든다. */
+    private String summarizePrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) return "";
+        String trimmed = prompt.trim();
+        return trimmed.length() > 200 ? trimmed.substring(0, 200) + "…" : trimmed;
     }
 
     /**

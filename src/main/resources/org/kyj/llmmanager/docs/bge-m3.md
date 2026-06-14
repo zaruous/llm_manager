@@ -70,7 +70,7 @@ git clone https://github.com/zaruous/bgem3-pyserver <설치경로>
 
 ## API 엔드포인트
 
-서버 실행 후 `http://localhost:3000` 에서 확인할 수 있다.
+서버 실행 후 `http://localhost:18080` 에서 확인할 수 있다.
 
 ```
 POST /embed          — 텍스트 배열을 벡터로 변환
@@ -81,7 +81,7 @@ GET  /docs           — FastAPI 자동 생성 Swagger UI
 ### 임베딩 요청 예시
 
 ```bash
-curl -X POST http://localhost:3000/embed \
+curl -X POST http://localhost:18080/embed \
   -H "Content-Type: application/json" \
   -d '{"texts": ["안녕하세요", "hello world"]}'
 ```
@@ -93,7 +93,7 @@ curl -X POST http://localhost:3000/embed \
 SQL Gen MCP Server의 임베딩 제공자로 사용할 수 있다.
 
 ```
-tei.base-url = http://localhost:3000/v1
+tei.base-url = http://localhost:18080/v1
 embedding.provider = tei
 ```
 
@@ -111,4 +111,4 @@ embedding.provider = tei
 `--batch-size` 값을 줄이거나 (예: 8~16), `--fp16 true`를 활성화한다.
 
 **포트 충돌**  
-기본 포트 3000이 사용 중이면 `--port` 값을 변경한다.
+기본 포트 18080이 사용 중이면 `--port` 값을 변경한다.

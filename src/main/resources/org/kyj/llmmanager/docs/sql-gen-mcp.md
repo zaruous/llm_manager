@@ -131,7 +131,7 @@ Claude: [sql-gen-mcp 도구 호출]
 BGE-M3 Embedding Server를 TEI 제공자로 사용하는 경우:
 
 ```
-tei.base-url = http://localhost:3000/v1
+tei.base-url = http://localhost:18080/v1
 embedding.provider = tei   (고급 설정에서 활성화)
 ```
 

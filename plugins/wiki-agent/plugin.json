@@ -1,7 +1,22 @@
 {
   "id": "wiki-agent",
   "name": "LLM Wiki Agent",
-  "version": "0.1.0",
+  "version": "0.4.0",
+  "ingest": {
+    "include": [
+      "*.md", "*.pdf", "*.docx", "*.pptx", "*.xlsx",
+      "*.html", "*.htm", "*.txt", "*.csv", "*.json", "*.xml",
+      "*.rst", "*.rtf", "*.epub", "*.ipynb",
+      "*.yaml", "*.yml", "*.tsv", "*.wav", "*.mp3"
+    ],
+    "exclude": [
+      "wiki/**",
+      "graph/**",
+      "tools/**",
+      "**/.*",
+      "**/.*/**"
+    ]
+  },
   "type": "local",
   "permissions": [
     "filesystem.read",
@@ -14,45 +29,46 @@
       {
         "id": "wiki.ingest",
         "title": "문서 수집 (Ingest)",
-        "description": "문서를 raw/에 수집하고 위키 페이지를 생성·갱신합니다. LLM 호출이 발생합니다.",
+        "description": "문서를 raw/에 수집하고 위키 페이지를 생성·갱신합니다. Cursor Agent가 실행합니다.",
         "requires": {
           "cwd": true,
-          "env": ["ANTHROPIC_API_KEY"]
+          "env": ["CURSOR_API_KEY"]
         }
       },
       {
         "id": "wiki.query",
         "title": "위키 질의 (Query)",
-        "description": "위키 전체를 조회해 질문에 답합니다. LLM 호출이 발생합니다.",
+        "description": "위키 전체를 조회해 질문에 답합니다. Cursor Agent가 실행합니다.",
         "requires": {
           "cwd": true,
-          "env": ["ANTHROPIC_API_KEY"]
+          "env": ["CURSOR_API_KEY"]
         }
       },
       {
         "id": "wiki.health",
         "title": "구조 검사 (Health)",
-        "description": "빈 페이지·인덱스 불일치·수집 로그 누락을 검사합니다. LLM 호출 없음.",
+        "description": "빈 페이지·인덱스 불일치·수집 로그 누락을 검사합니다. Cursor Agent가 실행합니다.",
         "requires": {
-          "cwd": true
+          "cwd": true,
+          "env": ["CURSOR_API_KEY"]
         }
       },
       {
         "id": "wiki.lint",
-        "title": "품질 검사 (Lint) — LLM 호출",
-        "description": "모순·낡은 내용 등 의미론적 품질을 검사합니다. LLM 호출이 발생합니다.",
+        "title": "품질 검사 (Lint)",
+        "description": "모순·낡은 내용 등 의미론적 품질을 검사합니다. Cursor Agent가 실행합니다.",
         "requires": {
           "cwd": true,
-          "env": ["ANTHROPIC_API_KEY"]
+          "env": ["CURSOR_API_KEY"]
         }
       },
       {
         "id": "wiki.graph",
-        "title": "그래프 빌드 (Graph) — LLM 호출",
-        "description": "위키링크와 AI 추론으로 지식 그래프(graph.html)를 생성합니다.",
+        "title": "그래프 빌드 (Graph)",
+        "description": "위키링크와 AI 추론으로 지식 그래프(graph.html)를 생성합니다. Cursor Agent가 실행합니다.",
         "requires": {
           "cwd": true,
-          "env": ["ANTHROPIC_API_KEY"]
+          "env": ["CURSOR_API_KEY"]
         }
       },
       {
@@ -83,36 +99,17 @@
             "title": "Environment",
             "fields": [
               {
-                "key": "ANTHROPIC_API_KEY",
-                "label": "Anthropic API Key",
+                "key": "CURSOR_API_KEY",
+                "label": "Cursor API Key",
                 "kind": "env",
                 "required": true,
                 "secret": true
-              },
-              {
-                "key": "LLM_MODEL",
-                "label": "LLM Model",
-                "kind": "text",
-                "defaultValue": "claude-sonnet-4-6"
-              },
-              {
-                "key": "LLM_MODEL_FAST",
-                "label": "LLM Model (Fast)",
-                "kind": "text",
-                "defaultValue": "claude-haiku-4-5"
               }
             ]
           },
           {
             "title": "Defaults",
             "fields": [
-              {
-                "key": "wiki.agent",
-                "label": "실행 에이전트",
-                "kind": "select",
-                "defaultValue": "claude",
-                "options": ["claude", "cursor"]
-              },
               {
                 "key": "wiki.defaultCwd",
                 "label": "기본 워크스페이스",

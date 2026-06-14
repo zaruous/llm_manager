@@ -95,18 +95,20 @@ LLMManager/
 
 - 스킬 팩: `tools.json`에 `wiki-agent` 도구 추가 (워크스페이스 골격/Claude/Gemini/Codex 팩)
 - 플러그인: `plugins/wiki-agent/` — wiki.ingest/query/health/lint/graph/openGraph 커맨드
-- `PluginCommandExecutor.runWikiTool()`이 Python 도구 실행 (UTF-8 강제, 모델 env 폴백 주입 —
-  업스트림 기본 모델은 retire되어 `claude-sonnet-4-6`/`claude-haiku-4-5`로 폴백)
-- 업스트림 도구는 wiki 경로를 스크립트 위치 기준(`Path(__file__).parent.parent`)으로 해석하므로
+- `PluginCommandExecutor.runWikiTool()`은 워크스페이스 검증·tools 동기화 후 항상
+  Cursor Agent에 위임한다 (v0.2.0에서 Python/litellm + ANTHROPIC_API_KEY 직접 실행 경로 제거)
+- 업스트림 Python 도구(tools/*.py)는 그래프 빌드 등에서 에이전트가 활용할 수 있도록
   실행 전 플러그인 tools/를 워크스페이스 `tools/`로 동기화한다
 - 전용 UI: `WikiQueryDialog`(CLI 세션형 — 이력은 워크스페이스 `.llm-manager/query-history.json`),
-  `WikiIngestDialog`(멀티 파일/폴더 선택 → raw/분류 복사 → 일괄 ingest),
+  `WikiIngestDialog`(멀티 파일/폴더 선택 → raw/분류 복사 → `WikiIngestPlanner` 작업 계획
+  순차 실행 + 프로그레스바; 작은 파일 배치 / 큰 텍스트 섹션 노트→병합 / 큰 PDF는
+  `WikiPageExtractor`+`tools/extract_pages.py`(pymupdf)로 페이지 이미지 전처리 후
+  5페이지씩 이미지 판독→병합, 실패 시 단계 처리 폴백;
+  raw 불변 복사·지원 확장자 필터·기수집 스킵·실행 전 횟수 확인),
   `WikiBrowserDialog`(트리 + WebView 마크다운 뷰, `[[WikiLink]]` 앱 내 이동 — help-template.html 재사용)
 - 도움말에 "LLM Wiki Agent" 항목 추가 (`docs/wiki-agent.md`)
-- 실행 에이전트 드롭다운(`wiki.agent`: claude | cursor, 기본 claude) — cursor 선택 시
-  Python 도구 대신 Cursor 사이드카에 자연어 위임(`runWikiViaCursorAgent`),
-  AGENTS.md 자동 설치, 필수 env 키도 `ANTHROPIC_API_KEY` ↔ `CURSOR_API_KEY`로
-  전환(`effectiveRequiredEnv`)
+- 실행 경로는 cursor 전용 — Cursor 사이드카에 자연어 위임(`runWikiViaCursorAgent`),
+  AGENTS.md 자동 설치, 필수 env는 `CURSOR_API_KEY` (plugin.json requires.env에 선언)
 - 실행 제어: `timeoutMinutes` 설정(기본 무제한), 중지 버튼은
   `PluginCommandExecutor.cancel(commandId)` → `destroyProcessTree()`로 자식까지 종료.
   워크스페이스 선택은 `wiki.defaultCwd`에 자동 영속화(`WikiWorkspaceInitializer.rememberWorkspace`).

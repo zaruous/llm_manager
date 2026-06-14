@@ -21,6 +21,8 @@ public class PluginManifest {
     private List<String> permissions = new ArrayList<>();
     private PluginInstall install = new PluginInstall();
     private PluginContributes contributes = new PluginContributes();
+    /** 수집 허용/제외 패턴 설정. 선언하지 않으면 WikiIngestDialog 기본값 사용. */
+    private PluginIngestConfig ingest = new PluginIngestConfig();
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -47,5 +49,10 @@ public class PluginManifest {
     public PluginInstall getInstall() { return install; }
     public void setInstall(PluginInstall install) {
         this.install = install != null ? install : new PluginInstall();
+    }
+
+    public PluginIngestConfig getIngest() { return ingest; }
+    public void setIngest(PluginIngestConfig ingest) {
+        this.ingest = ingest != null ? ingest : new PluginIngestConfig();
     }
 }

@@ -8,19 +8,19 @@ import org.junit.jupiter.api.Test;
 import org.kyj.llmmanager.model.plugin.LoadedPlugin;
 import org.kyj.llmmanager.model.plugin.PluginSettingsField;
 
-import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * wiki-agent 플러그인 manifest가 PluginManager 경로로 정상 로드되는지 검증한다.
- * 설정 탭의 실행 에이전트(select) 필드가 드롭다운으로 렌더링될 조건을 함께 확인.
+ * cursor 전용 축소(v0.2.0) 이후의 manifest 구성을 함께 확인 —
+ * 실행 커맨드는 CURSOR_API_KEY를 요구하고, 제거된 wiki.agent 드롭다운은 없어야 한다.
  */
 class PluginManagerWikiAgentTest {
 
     @Test
-    void wikiAgentManifestLoadsWithSettingsDropdown() {
+    void wikiAgentManifestLoadsCursorOnly() {
         PluginManager manager = new PluginManager();
         manager.load();
 
@@ -34,20 +34,40 @@ class PluginManagerWikiAgentTest {
                 .toList();
         assertEquals(1, tabs.size(), "Wiki Agent 설정 탭이 1개 있어야 함");
 
-        // 실행 에이전트 select 필드 — SettingsDialog가 ComboBox로 렌더링하는 조건
-        Optional<PluginSettingsField> agentField = tabs.get(0).tab().getSections().stream()
+        var fields = tabs.get(0).tab().getSections().stream()
                 .flatMap(s -> s.getFields().stream())
-                .filter(f -> "wiki.agent".equals(f.getKey()))
+                .toList();
+
+        // cursor 전용 축소로 실행 에이전트 드롭다운(wiki.agent)은 제거됨
+        assertTrue(fields.stream().noneMatch(f -> "wiki.agent".equals(f.getKey())),
+                "wiki.agent 필드는 제거되어야 함");
+        assertTrue(fields.stream().noneMatch(f -> f.getKey().startsWith("LLM_MODEL")),
+                "claude 전용 모델 필드는 제거되어야 함");
+
+        // CURSOR_API_KEY env 필드 — SettingsDialog가 env 안내로 렌더링하는 조건
+        Optional<PluginSettingsField> keyField = fields.stream()
+                .filter(f -> "CURSOR_API_KEY".equals(f.getKey()))
                 .findFirst();
-        assertTrue(agentField.isPresent(), "wiki.agent 필드가 있어야 함");
-        assertEquals("select", agentField.get().getKind());
-        assertEquals(List.of("claude", "cursor"), agentField.get().getOptions());
-        assertEquals("claude", agentField.get().getDefaultValue());
+        assertTrue(keyField.isPresent(), "CURSOR_API_KEY 필드가 있어야 함");
+        assertEquals("env", keyField.get().getKind());
 
         // 커맨드 7종 등록 확인
-        long wikiCommands = manager.getCommands().stream()
+        var wikiCommands = manager.getCommands().stream()
                 .filter(c -> "wiki-agent".equals(c.pluginId()))
-                .count();
-        assertEquals(7, wikiCommands, "wiki 커맨드 7종이 등록되어야 함");
+                .toList();
+        assertEquals(7, wikiCommands.size(), "wiki 커맨드 7종이 등록되어야 함");
+
+        // 실행형 커맨드(browse·openGraph 제외)는 모두 CURSOR_API_KEY를 요구해야 함
+        for (var contribution : wikiCommands) {
+            var command = contribution.command();
+            String id = command.getId();
+            if ("wiki.browse".equals(id) || "wiki.openGraph".equals(id)) {
+                assertTrue(command.getRequires().getEnv().isEmpty(),
+                        id + "는 env 요구가 없어야 함");
+            } else {
+                assertTrue(command.getRequires().getEnv().contains("CURSOR_API_KEY"),
+                        id + "는 CURSOR_API_KEY를 요구해야 함");
+            }
+        }
     }
 }
