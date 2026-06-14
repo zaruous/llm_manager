@@ -163,9 +163,16 @@ public class UpdateInstallDialog {
                     label.setText("설치 준비 중...");
                 });
 
-                // 현재 실행 파일 위치에서 설치 디렉토리 산출 — 배포판: LLMManager.exe의 부모 디렉토리
+                // jpackage 구조: runtime/bin/java.exe → 상위로 거슬러 LLMManager.exe가 있는 루트 탐색
                 Path installDir = ProcessHandle.current().info().command()
-                        .map(cmd -> Path.of(cmd).getParent())
+                        .map(cmd -> {
+                            Path p = Path.of(cmd).getParent();
+                            while (p != null) {
+                                if (Files.exists(p.resolve("LLMManager.exe"))) return p;
+                                p = p.getParent();
+                            }
+                            return null;
+                        })
                         .orElse(null);
 
                 Path batPath = tmpDir.resolve("update.bat");
@@ -175,6 +182,13 @@ public class UpdateInstallDialog {
                 new ProcessBuilder("cmd.exe", "/c", "start", "/B", "", batPath.toString()).start();
 
                 Platform.runLater(() -> {
+                    // FX 스레드에서 System.exit() 직접 호출 시 glass.dll 크래시 — 데몬 스레드에서 지연 종료
+                    Thread exitThread = new Thread(() -> {
+                        try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                        System.exit(0);
+                    });
+                    exitThread.setDaemon(true);
+                    exitThread.start();
                     stage.close();
                     Platform.exit();
                 });
@@ -199,14 +213,15 @@ public class UpdateInstallDialog {
         String installDirStr = installDir != null ? installDir.toString() : "%~dp0";
         return "@echo off\r\n"
              + "chcp 65001 > nul\r\n"
-             + "timeout /t 3 /nobreak > nul\r\n"
+             + "timeout /t 5 /nobreak > nul\r\n"
              + "\r\n"
              + "set INSTALL_DIR=" + installDirStr + "\r\n"
              + "set ZIP_PATH=" + zipPath + "\r\n"
              + "set EXTRACT_DIR=%TEMP%\\llm-manager-update\\extracted\r\n"
              + "\r\n"
              + "powershell -Command \"Expand-Archive -Path '%ZIP_PATH%' -DestinationPath '%EXTRACT_DIR%' -Force\"\r\n"
-             + "xcopy /E /Y \"%EXTRACT_DIR%\\LLMManager\\*\" \"%INSTALL_DIR%\\\"\r\n"
+             // xcopy /E /Y "src\\*" 는 최상위 파일만 복사하므로, 와일드카드 없이 디렉토리 전체를 robocopy로 복사
+             + "robocopy \"%EXTRACT_DIR%\\LLMManager\" \"%INSTALL_DIR%\" /E /IS /IT /NFL /NDL /NJH /NJS\r\n"
              + "\r\n"
              + "start \"\" \"%INSTALL_DIR%\\LLMManager.exe\"\r\n"
              + "\r\n"
