@@ -84,9 +84,23 @@
 
 | 후보 | 장점 | 단점 | 판단 |
 |------|------|------|------|
-| **SQLite + sqlite-vec** | 단일 파일·무서버·기존 sqlite-jdbc 스택 재사용. 위키 규모(수백~수천 페이지)에 충분 | 초대형 규모엔 부적합 | ★ **권장** |
+| **SQLite + sqlite-vec** | 단일 파일·무서버·기존 sqlite-jdbc 스택 재사용. HNSW 인덱스로 규모 무관 ~1ms 검색 | 네이티브 바이너리 배포 필요 → service-pack 설치로 해소 | ★ **권장** |
+| SQLite + Java 코사인 | 네이티브 바이너리 불필요 | 25,000 청크 기준 쿼리당 10~50ms, 메모리 100MB+ | 목표 규모 초과 |
 | Chroma / Qdrant | 고기능 (필터링·하이브리드 검색) | 별도 서버 프로세스·의존성 증가 | 위키 규모 대비 과함 |
 | graph.json 내 임베딩 직렬화 | 의존성 0 | 전량 메모리 로드·검색 직접 구현 | 비권장 |
+
+**sqlite-vec 채택 근거 (규모 분석)**
+
+목표 문서 수 5,000개 이상(UI + 서비스 코드 기준)을 가정하면:
+
+```
+5,000 페이지 × 평균 5청크 = 25,000 청크
+25,000 × 1,024차원(BGE-M3) × 4 bytes = ~100MB (벡터만)
+Java 선형 탐색: 쿼리당 10~50ms — 위키 질의가 내부 복수 검색 시 체감
+sqlite-vec HNSW: 규모 무관 ~1ms
+```
+
+네이티브 바이너리 배포 부담은 service-pack 설치 템플릿(6-3 참조)으로 완전히 자동화한다.
 
 ### 5-2. 색인 파이프라인
 
@@ -154,11 +168,51 @@ vector-index.db upsert  (page_path, chunk_id, type, tags, vector, content_hash)
 
 ### 6-3. service-pack 정의 (`service-packs/wiki-mcp.yml` 초안)
 
+`bgem3-embedding.yml`이 CUDA 자동 감지를 `groovyScript`로 처리하듯,
+`wiki-mcp.yml`은 설치 시 sqlite-vec 바이너리 경로와 DB 경로를 자동 주입한다.
+사용자는 워크스페이스 경로만 지정하면 된다.
+
+**설치 흐름**
+
+```
+사용자: 기본 제공 서비스 → wiki-mcp 선택
+    ↓
+BuiltinServiceSetupDialog
+  - --workspace 경로 입력
+  - --transport 선택 (stdio / http)
+    ↓
+InstallationService.install()
+  - vec0.dll / vec0.so 를 ~/llm-services/native/ 로 복사
+  - vector-index.db 스키마 초기화
+    ↓
+groovyScript 실행
+  - OS 감지 → --vec-lib 경로 자동 주입
+  - --db-path 를 workspace/.llm-manager/vector-index.db 로 자동 설정
+  - bgem3-embedding 서비스 미기동 시 안내
+```
+
+**배포 패키지 구조**
+
+```
+app/
+├── lib/           ← JAR들
+├── native/
+│   ├── vec0.dll   ← Windows (jpackage doLast로 복사)
+│   └── vec0.so    ← Linux (향후)
+└── service-packs/
+    └── wiki-mcp.yml
+```
+
+`build.gradle`의 `copyJavaExeToRuntime()`과 동일한 방식으로 `doLast` 태스크에서
+플랫폼별 바이너리를 `app/native/`로 복사한다.
+
+**wiki-mcp.yml**
+
 ```yaml
 name: Wiki MCP Server
 id: wiki-mcp
 description: LLM Wiki를 MCP 도구로 노출하는 서버 (시맨틱 검색·페이지 조회·질의)
-runtimeType: python          # sql-gen-mcp.yml 스키마에 맞춰 조정
+runtimeType: python
 startCommand: python -m wiki_mcp_server
 argSpecs:
   - flag: --workspace
@@ -178,7 +232,25 @@ argSpecs:
     label: 쓰기 도구(wiki_ingest) 허용
     type: BOOLEAN
     default: false
-# groovyScript: OS별 python 경로 보정, 임베딩 서비스 주소 주입 등
+  - flag: --vec-lib
+    label: sqlite-vec 라이브러리 경로
+    type: STRING
+    hidden: true   # groovyScript가 자동 주입 — 사용자 노출 안 함
+  - flag: --db-path
+    label: 벡터 색인 DB 경로
+    type: STRING
+    hidden: true   # groovyScript가 자동 주입
+
+groovyScript: |
+  def nativeDir = new File(userHome + "/llm-services/native")
+  def vecLib = os == "windows"
+      ? new File(nativeDir, "vec0.dll")
+      : new File(nativeDir, "vec0.so")
+
+  service.setArgValue("--vec-lib", vecLib.absolutePath)
+  service.setArgValue("--db-path",
+      service.getArgValue("--workspace") +
+      "/.llm-manager/vector-index.db")
 ```
 
 ### 6-4. 에이전트 등록 연동
@@ -216,7 +288,7 @@ argSpecs:
 | 리스크 | 영향 | 완화책 |
 |--------|------|--------|
 | bgem3-embedding 서비스 의존 | 임베딩 서비스 미설치·미기동 시 색인 불가 | 색인은 항상 선택 기능 — 미기동 시 키워드 검색 폴백. UI에서 서비스 기동 유도 |
-| sqlite-vec 네이티브 바이너리 | OS별 확장 로딩 이슈 가능 | 도입 전 Windows 스파이크 테스트. 실패 시 순수 Java 코사인 검색(수천 청크 규모는 무리 없음)으로 대체 |
+| sqlite-vec 네이티브 바이너리 | OS별 확장 로딩 이슈 가능 | service-pack 설치 시 `InstallationService`가 `~/llm-services/native/`에 자동 복사, `groovyScript`가 경로 주입. 도입 전 Windows 스파이크 테스트 필수. 로딩 실패 시 Java 코사인 검색으로 자동 폴백(5,000페이지 미만 운영 시 허용 범위) |
 | MCP 쓰기 도구 오남용 | 외부 에이전트가 위키 오염 | `wiki_ingest` 기본 비활성 + opt-in argSpec. 모든 쓰기는 `wiki/log.md`에 기록되므로 추적 가능 |
 | 색인-위키 불일치 | 에이전트가 위키를 직접 수정하면(스킬 모드) 색인이 낡음 | `content_hash` 비교 기반 증분 재색인 + 위키 탭에 "색인 상태" 표시(낡은 청크 수) |
 | query.py 페이지 주입 옵션 부재 | 5-3의 Query 연동이 업스트림 수정 필요할 수 있음 | 옵션 없으면 프롬프트 주입 방식으로 우회, 업스트림 PR 검토 |

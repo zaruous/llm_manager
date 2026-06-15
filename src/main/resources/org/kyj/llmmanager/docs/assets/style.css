@@ -1,0 +1,258 @@
+:root {
+  --bg:           #1a1a2e;
+  --bg2:          #1e1e2e;
+  --bg3:          #13131f;
+  --border:       #2a2a3a;
+  --text:         #cccccc;
+  --text-dim:     #888888;
+  --accent:       #336699;
+  --accent-light: #aaccff;
+  --code-bg:      #0d0d1a;
+  --code-text:    #88dd88;
+  --link:         #66aaff;
+  --sidebar-bg:   #15152a;
+  --sidebar-w:    240px;
+  --active-bg:    #223355;
+}
+
+[data-theme="light"] {
+  --bg:           #ffffff;
+  --bg2:          #f4f4f4;
+  --bg3:          #e8e8e8;
+  --border:       #cccccc;
+  --text:         #222222;
+  --text-dim:     #666666;
+  --accent:       #2255aa;
+  --accent-light: #1144cc;
+  --code-bg:      #f0f0f0;
+  --code-text:    #228822;
+  --link:         #1155cc;
+  --sidebar-bg:   #f0f0f8;
+  --active-bg:    #ddeeff;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+/* ── 레이아웃 ──────────────────────────────── */
+.layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── 사이드바 ──────────────────────────────── */
+.sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-title {
+  font-weight: 600;
+  color: var(--accent-light);
+  font-size: 15px;
+}
+
+.theme-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 14px;
+}
+.theme-btn:hover { color: var(--text); }
+
+.search-box {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-box input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 13px;
+}
+.search-box input::placeholder { color: var(--text-dim); }
+
+.nav-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.nav-tree details { margin: 0; }
+.nav-tree summary {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  list-style: none;
+}
+.nav-tree summary::-webkit-details-marker { display: none; }
+.nav-tree summary::before {
+  content: '▸ ';
+  font-size: 10px;
+}
+.nav-tree details[open] > summary::before { content: '▾ '; }
+
+.nav-tree ul { list-style: none; padding: 0; margin: 0 0 4px; }
+.nav-tree li a {
+  display: block;
+  padding: 4px 14px 4px 24px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-tree li a:hover { background: var(--bg2); }
+.nav-tree li a.active {
+  background: var(--active-bg);
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
+/* ── 메인 콘텐츠 ────────────────────────────── */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+.print-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.print-btn:hover { color: var(--text); border-color: var(--accent); }
+
+article {
+  padding: 28px 40px 48px;
+  max-width: 880px;
+}
+
+/* ── 제목 ──────────────────────────────────── */
+h1 {
+  color: var(--accent-light);
+  font-size: 22px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 22px;
+}
+h2 {
+  color: var(--accent-light);
+  font-size: 16px;
+  margin: 32px 0 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+h3 { color: #9999cc; font-size: 14px; margin: 20px 0 6px; }
+
+/* ── 본문 ──────────────────────────────────── */
+p  { margin: 8px 0; }
+hr { border: none; border-top: 1px solid var(--border); margin: 26px 0; }
+a  { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+ul, ol { padding-left: 22px; margin: 8px 0; }
+li { margin: 3px 0; }
+
+/* ── 코드 ──────────────────────────────────── */
+code {
+  background: var(--code-bg);
+  color: var(--code-text);
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 18px;
+  overflow-x: auto;
+  margin: 12px 0;
+  line-height: 1.55;
+}
+pre code { padding: 0; background: none; font-size: 12.5px; }
+
+/* ── 테이블 ─────────────────────────────────── */
+table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13px; }
+th {
+  background: var(--bg2);
+  color: var(--accent-light);
+  padding: 8px 14px;
+  text-align: left;
+  border: 1px solid var(--border);
+  font-weight: 600;
+}
+td { padding: 7px 14px; border: 1px solid var(--border); vertical-align: top; }
+tr:nth-child(even) td { background: var(--bg3); }
+
+/* ── 인용구 ─────────────────────────────────── */
+blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 8px 16px;
+  margin: 14px 0;
+  color: var(--text-dim);
+  background: var(--bg2);
+  border-radius: 0 4px 4px 0;
+}
+
+/* ── 인쇄 / PDF ─────────────────────────────── */
+@media print {
+  .sidebar, .toolbar, .print-btn { display: none !important; }
+  .layout { display: block; }
+  .content { overflow: visible; }
+  body { background: white; color: black; font-size: 11pt; }
+  a { color: black; }
+  pre, code { border: 1px solid #ccc; background: #f8f8f8; color: #333; }
+  h1, h2, h3 { page-break-after: avoid; color: #000; }
+  pre { page-break-inside: avoid; }
+  table { page-break-inside: avoid; }
+  article { padding: 0; max-width: 100%; }
+}
