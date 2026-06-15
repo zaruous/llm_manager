@@ -62,6 +62,9 @@ public class AppContext {
         appSettingsRepository.load();
         pluginManager = new PluginManager();
         pluginManager.load();
+        // groovyScript 바인딩 'pluginsDir'에서 플러그인 디렉토리를 참조할 수 있도록 시스템 프로퍼티 설정
+        System.setProperty("llm.pluginsDir",
+                pluginManager.getPluginDir().toAbsolutePath().toString());
         pluginCommandExecutor = new PluginCommandExecutor(pluginManager, appSettingsRepository);
         pluginDependencyInstaller = new PluginDependencyInstaller();
         devHotReloader    = new DevHotReloader();

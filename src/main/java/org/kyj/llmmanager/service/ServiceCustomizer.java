@@ -39,6 +39,8 @@ public class ServiceCustomizer {
         b.put("os", resolveOs());
         b.put("userHome", System.getProperty("user.home"));
         b.put("arch", System.getProperty("os.arch").contains("aarch64") ? "arm64" : "x64");
+        // AppContext.init()이 설정하는 플러그인 디렉토리 경로 (groovyScript에서 플러그인 파일 참조용)
+        b.put("pluginsDir", System.getProperty("llm.pluginsDir", "plugins"));
         b.put("env", new Closure<String>(null) {
             @Override
             public String call(Object... args) {

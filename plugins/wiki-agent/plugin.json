@@ -131,6 +131,25 @@
                 "defaultValue": ""
               }
             ]
+          },
+          {
+            "title": "Vector DB (시맨틱 검색)",
+            "fields": [
+              {
+                "key": "wiki.embeddingUrl",
+                "label": "BGE-M3 임베딩 서버 URL",
+                "kind": "string",
+                "defaultValue": "http://localhost:18080",
+                "description": "bgem3-embedding 서비스 주소. wiki.reindex 및 시맨틱 검색에 사용됩니다."
+              },
+              {
+                "key": "wiki.vec0Path",
+                "label": "sqlite-vec 라이브러리 경로",
+                "kind": "string",
+                "defaultValue": "",
+                "description": "vec0.dll (Windows) 또는 vec0.so (Linux) 절대 경로. 비워두면 코사인 선형 탐색으로 폴백됩니다."
+              }
+            ]
           }
         ]
       }

@@ -42,7 +42,12 @@ argSpecs:
     hidden: true
 
 groovyScript: |
-  // OS에 따른 python 명령어 및 vec0 경로 자동 설정
+  // server.py는 wiki-agent 플러그인 디렉토리에 있다.
+  // pluginsDir 바인딩은 AppContext.init()이 llm.pluginsDir 시스템 프로퍼티로 설정한 값.
+  def pluginDir = new File(pluginsDir, 'wiki-agent')
+  service.workingDir = pluginDir.absolutePath
+
+  // OS에 따른 python 명령어
   service.startCommand = (os == 'windows') ? 'python server.py' : 'python3 server.py'
 
   def nativeDir = userHome + '/llm-services/native'
