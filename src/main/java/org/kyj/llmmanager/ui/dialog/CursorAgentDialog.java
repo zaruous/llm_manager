@@ -80,6 +80,8 @@ public class CursorAgentDialog {
     private TextArea terminalArea;
     private TextArea promptArea;
     private Button sendBtn;
+    /** 실행 중인 에이전트를 강제 종료하는 중지 버튼. 실행 중일 때만 활성화된다. */
+    private Button stopBtn;
     private ProgressIndicator runningIndicator;
     /** 헤더의 cwd·모델 표시 라벨. /model 명령으로 변경 시 갱신. */
     private Label sessionInfoLabel;
@@ -431,10 +433,21 @@ public class CursorAgentDialog {
         sendBtn = new Button("전송");
         sendBtn.setPrefWidth(80);
         sendBtn.setOnAction(e -> sendPrompt());
+
+        stopBtn = new Button("중지");
+        stopBtn.setPrefWidth(80);
+        stopBtn.setDisable(true);
+        stopBtn.setStyle("-fx-base: #e74c3c; -fx-text-fill: white;");
+        stopBtn.setOnAction(e -> {
+            AppContext.getInstance().getPluginCommandExecutor()
+                    .cancel(contribution.command().getId());
+            appendLine("[중지 요청 — 프로세스 종료 중]");
+        });
+
         Button closeBtn = new Button("닫기");
         closeBtn.setPrefWidth(80);
         closeBtn.setOnAction(e -> stage.close());
-        VBox sideButtons = new VBox(8, sendBtn, closeBtn);
+        VBox sideButtons = new VBox(8, sendBtn, stopBtn, closeBtn);
         sideButtons.setAlignment(Pos.TOP_CENTER);
 
         HBox inputRow = new HBox(10, promptArea, sideButtons, runningIndicator);
@@ -943,6 +956,7 @@ public class CursorAgentDialog {
 
     private void setRunningUi(boolean active) {
         sendBtn.setDisable(active);
+        stopBtn.setDisable(!active);
         runningIndicator.setVisible(active);
     }
 

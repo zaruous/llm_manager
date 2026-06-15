@@ -89,8 +89,8 @@
       },
       {
         "id": "wiki.reindex",
-        "title": "벡터 재색인 (전체)",
-        "description": "위키 페이지 전체를 벡터 DB에 재색인합니다. bgem3-embedding 서비스가 실행 중이어야 합니다.",
+        "title": "벡터 색인 갱신",
+        "description": "선택한 워크스페이스의 wiki/ 페이지를 증분 색인합니다. 변경된 청크만 BGE-M3 임베딩을 호출하므로 이미 색인된 페이지는 건너뜁니다. bgem3-embedding 서비스가 실행 중이어야 합니다.",
         "requires": {
           "cwd": true
         }
