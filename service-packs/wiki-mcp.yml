@@ -5,57 +5,87 @@ runtimeType: PYTHON
 startCommand: "python server.py"
 port: 18090
 healthCheckPath: /health
-installDir: "${llm.home}/wiki-mcp-server"
 installCommands:
   - "pip install fastmcp>=2.0.0"
 
 argSpecs:
-  - flag: --port
+  - name: port
+    flag: --port
     label: MCP 서버 포트
     type: NUMBER
     defaultValue: "18090"
-  - flag: --embedding-url
+  - name: embedding-url
+    flag: --embedding-url
     label: BGE-M3 임베딩 서버 URL
     type: STRING
     defaultValue: "http://localhost:18080"
     description: "bgem3-embedding 서비스 주소 (벡터 검색 사용 시 필요)"
-  - flag: --enable-write
+  - name: enable-write
+    flag: --enable-write
     label: 쓰기 도구(wiki_ingest) 허용
     type: BOOLEAN
     defaultValue: "false"
     description: "외부 에이전트가 위키를 수정할 수 있도록 허용 (기본 비활성)"
-  # hidden argSpecs — groovyScript가 설치 시 자동 주입
-  - flag: --workspace
+  - name: workspace
+    flag: --workspace
     label: 위키 워크스페이스 경로
     type: DIRECTORY
     required: true
     description: "wiki/index.md가 있는 루트 디렉토리"
-  - flag: --db-path
-    label: "[자동] 벡터 색인 DB 경로"
+  - name: db-path
+    flag: --db-path
+    label: "벡터 색인 DB 경로"
     type: STRING
-    defaultValue: ""
-    hidden: true
-  - flag: --vec0-path
-    label: "[자동] sqlite-vec 라이브러리 경로"
+    defaultValue: "~/llm-services/wiki-mcp-server/wiki-vector.sqlite"
+    description: "워크스페이스 지정 시 {workspace}/.llm-manager/wiki-vector.sqlite로 자동 변경됩니다."
+  - name: vec0-path
+    flag: --vec0-path
+    label: "sqlite-vec 라이브러리 경로"
     type: STRING
-    defaultValue: ""
-    hidden: true
+    defaultValue: "~/llm-services/native/vec0.dll"
+    description: "vec0.dll (Windows) 또는 vec0.so (Linux·Mac). 비워두면 코사인 선형 탐색으로 폴백됩니다."
 
 groovyScript: |
-  // server.py는 wiki-agent 플러그인 디렉토리에 있다.
-  // pluginsDir 바인딩은 AppContext.init()이 llm.pluginsDir 시스템 프로퍼티로 설정한 값.
+  // installDir: INSTALL_BASE 환경변수 우선, 없으면 ~/llm-services/wiki-mcp-server (bgem3 방식과 동일)
+  service.installDir = env('INSTALL_BASE') ?: (userHome + '/llm-services/wiki-mcp-server')
+
+  // server.py는 설치 시 plugin 디렉토리에서 installDir로 복사하고, 실행은 installDir 기준으로 한다.
+  // pluginsDir 바인딩은 AppContext.init()이 llm.pluginsDir 시스템 프로퍼티로 설정한 값이다.
   def pluginDir = new File(pluginsDir, 'wiki-agent')
-  service.workingDir = pluginDir.absolutePath
+  service.workingDir = service.installDir
 
   // OS에 따른 python 명령어
   service.startCommand = (os == 'windows') ? 'python server.py' : 'python3 server.py'
 
+  def installDirFile = new File(service.installDir)
+  def serverFile = new File(pluginDir, 'server.py')
+  def toolsDir = new File(pluginDir, 'tools')
+
+  if (os == 'windows') {
+    def psq = { s -> "'" + s.replace("'", "''") + "'" }
+    def copyCommand = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType Directory -Force -Path ${psq(installDirFile.absolutePath)} | Out-Null; Copy-Item -LiteralPath ${psq(serverFile.absolutePath)} -Destination ${psq(new File(installDirFile, 'server.py').absolutePath)} -Force; Copy-Item -LiteralPath ${psq(toolsDir.absolutePath)} -Destination ${psq(installDirFile.absolutePath)} -Recurse -Force\""
+    service.installCommands = [
+      copyCommand.toString(),
+      "pip install \"fastmcp>=2.0.0\""
+    ]
+  } else {
+    def shQuote = { s -> "'" + s.replace("'", "'\"'\"'") + "'" }
+    def copyCommand = "mkdir -p ${shQuote(new File(installDirFile, 'tools').absolutePath)} && cp -f ${shQuote(serverFile.absolutePath)} ${shQuote(new File(installDirFile, 'server.py').absolutePath)} && cp -R ${shQuote(new File(toolsDir, '.').absolutePath)} ${shQuote(new File(installDirFile, 'tools').absolutePath)}"
+    service.installCommands = [
+      copyCommand.toString(),
+      "pip install 'fastmcp>=2.0.0'"
+    ]
+  }
+
+  // vec0 라이브러리 기본 경로: ~/llm-services/native/vec0.dll(.so)
   def nativeDir = userHome + '/llm-services/native'
   def vec0File  = (os == 'windows') ? (nativeDir + '/vec0.dll') : (nativeDir + '/vec0.so')
-  service.setArgValue('--vec0-path', vec0File)
+  service.argValues['vec0-path'] = vec0File
 
-  // --workspace가 이미 설정되어 있으면 db-path를 워크스페이스 기준으로 자동 생성
-  def ws = service.getArgValue('--workspace')
+  // db-path: 워크스페이스가 설정된 경우 워크스페이스 기준, 아니면 installDir 기준 기본값 사용
+  def ws = service.argValues?.get('workspace')
   if (ws != null && !ws.isBlank()) {
-    service.setArgValue('--db-path', ws + '/.llm-manager/wiki-vector.sqlite')
+    service.argValues['db-path'] = new File(new File(ws, '.llm-manager'), 'wiki-vector.sqlite').absolutePath
+  } else {
+    service.argValues['db-path'] = new File(service.installDir, 'wiki-vector.sqlite').absolutePath
   }
