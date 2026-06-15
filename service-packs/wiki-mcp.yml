@@ -1,0 +1,56 @@
+name: Wiki MCP Server
+id: wiki-mcp
+description: "위키 워크스페이스를 MCP 도구로 노출하는 서버 (시맨틱 검색·페이지 조회·질의)"
+runtimeType: PYTHON
+startCommand: "python server.py"
+port: 18090
+healthCheckPath: /health
+installDir: "${llm.home}/wiki-mcp-server"
+installCommands:
+  - "pip install fastmcp>=2.0.0"
+
+argSpecs:
+  - flag: --port
+    label: MCP 서버 포트
+    type: NUMBER
+    defaultValue: "18090"
+  - flag: --embedding-url
+    label: BGE-M3 임베딩 서버 URL
+    type: STRING
+    defaultValue: "http://localhost:18080"
+    description: "bgem3-embedding 서비스 주소 (벡터 검색 사용 시 필요)"
+  - flag: --enable-write
+    label: 쓰기 도구(wiki_ingest) 허용
+    type: BOOLEAN
+    defaultValue: "false"
+    description: "외부 에이전트가 위키를 수정할 수 있도록 허용 (기본 비활성)"
+  # hidden argSpecs — groovyScript가 설치 시 자동 주입
+  - flag: --workspace
+    label: 위키 워크스페이스 경로
+    type: DIRECTORY
+    required: true
+    description: "wiki/index.md가 있는 루트 디렉토리"
+  - flag: --db-path
+    label: "[자동] 벡터 색인 DB 경로"
+    type: STRING
+    defaultValue: ""
+    hidden: true
+  - flag: --vec0-path
+    label: "[자동] sqlite-vec 라이브러리 경로"
+    type: STRING
+    defaultValue: ""
+    hidden: true
+
+groovyScript: |
+  // OS에 따른 python 명령어 및 vec0 경로 자동 설정
+  service.startCommand = (os == 'windows') ? 'python server.py' : 'python3 server.py'
+
+  def nativeDir = userHome + '/llm-services/native'
+  def vec0File  = (os == 'windows') ? (nativeDir + '/vec0.dll') : (nativeDir + '/vec0.so')
+  service.setArgValue('--vec0-path', vec0File)
+
+  // --workspace가 이미 설정되어 있으면 db-path를 워크스페이스 기준으로 자동 생성
+  def ws = service.getArgValue('--workspace')
+  if (ws != null && !ws.isBlank()) {
+    service.setArgValue('--db-path', ws + '/.llm-manager/wiki-vector.sqlite')
+  }

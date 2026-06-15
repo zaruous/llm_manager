@@ -203,6 +203,13 @@ distributions {
                 include 'swagger-mcp-server.jar'
                 into 'lib'
             }
+            // sqlite-vec 네이티브 라이브러리 (vec0.dll / vec0.so)
+            // lib/native/ 에 파일이 없으면 no-op
+            from('lib/native') {
+                include 'vec0.dll'
+                include 'vec0.so'
+                into 'native'
+            }
         }
     }
 }
@@ -275,6 +282,15 @@ tasks.register('prepareJpackageInput', Copy) {
         include '*.yml'
         include '*.yaml'
         into 'service-packs'
+    }
+
+    // sqlite-vec 네이티브 라이브러리: lib/native/ → app/native/
+    // WikiVectorRepository가 AppSettings의 wiki.vec0Path 또는 이 경로를 사용한다.
+    // lib/native/ 에 파일이 없으면 no-op.
+    from(project.file('lib/native')) {
+        include 'vec0.dll'
+        include 'vec0.so'
+        into 'native'
     }
 }
 

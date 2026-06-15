@@ -86,6 +86,14 @@
         "requires": {
           "cwd": false
         }
+      },
+      {
+        "id": "wiki.reindex",
+        "title": "벡터 재색인 (전체)",
+        "description": "위키 페이지 전체를 벡터 DB에 재색인합니다. bgem3-embedding 서비스가 실행 중이어야 합니다.",
+        "requires": {
+          "cwd": true
+        }
       }
     ],
     "settingsTabs": [

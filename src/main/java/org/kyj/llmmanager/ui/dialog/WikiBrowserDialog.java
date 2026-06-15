@@ -6,6 +6,7 @@ package org.kyj.llmmanager.ui.dialog;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kyj.llmmanager.AppContext;
+import org.kyj.llmmanager.service.WikiIndexService;
 import org.kyj.llmmanager.service.WikiMarkdownUtils;
 import org.kyj.llmmanager.util.SceneFactory;
 
@@ -204,8 +205,17 @@ public class WikiBrowserDialog {
         searchField.textProperty().addListener((obs, old, value) -> {
             if (value == null || value.isBlank()) rebuildTree();
         });
+        HBox.setHgrow(searchField, Priority.ALWAYS);
 
-        VBox left = new VBox(8, searchField, treeView);
+        // 시맨틱 검색 버튼 — bgem3-embedding + 벡터 색인이 있을 때 유효
+        Button semanticBtn = new Button("~");
+        semanticBtn.setTooltip(new javafx.scene.control.Tooltip(
+                "시맨틱 검색 (벡터 유사도 — bgem3-embedding 서비스와 벡터 색인 필요)"));
+        semanticBtn.setOnAction(e -> runSemanticSearch(searchField.getText()));
+
+        HBox searchBar = new HBox(4, searchField, semanticBtn);
+
+        VBox left = new VBox(8, searchBar, treeView);
         left.setPadding(new Insets(0, 0, 0, 0));
         VBox.setVgrow(treeView, Priority.ALWAYS);
 
@@ -350,6 +360,46 @@ public class WikiBrowserDialog {
             results.addAll(contentHits);
             Platform.runLater(() -> showSearchResults(keyword, results));
         }, "wiki-search").start();
+    }
+
+    /**
+     * 벡터 유사도 기반 시맨틱 검색을 백그라운드에서 실행한다.
+     * bgem3-embedding 서비스 미기동 또는 색인 미구축 시 키워드 검색으로 폴백한다.
+     *
+     * @param query 자연어 검색어
+     */
+    private void runSemanticSearch(String query) {
+        if (query == null || query.isBlank()) {
+            rebuildTree();
+            return;
+        }
+        if (workspace == null) {
+            runSearch(query);
+            return;
+        }
+        org.kyj.llmmanager.service.WikiIndexService svc =
+                AppContext.getInstance().getWikiIndexService();
+        if (svc == null || svc.countChunks(workspace) == 0) {
+            // 색인 미구축 시 키워드 검색 폴백
+            runSearch(query);
+            return;
+        }
+        new Thread(() -> {
+            var results = svc.search(workspace, query, 20);
+            if (results.isEmpty()) {
+                Platform.runLater(() -> runSearch(query));
+                return;
+            }
+            List<PageNode> pageNodes = results.stream()
+                    .map(r -> {
+                        Path file = workspace.resolve(r.pagePath().replace('/', java.io.File.separatorChar));
+                        String label = r.pagePath();
+                        return new PageNode(label, Files.isRegularFile(file) ? file : null);
+                    })
+                    .distinct()
+                    .toList();
+            Platform.runLater(() -> showSearchResults("~" + query, pageNodes));
+        }, "wiki-semantic-search").start();
     }
 
     private void showSearchResults(String keyword, List<PageNode> results) {

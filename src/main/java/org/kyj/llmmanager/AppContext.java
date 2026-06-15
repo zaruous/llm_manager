@@ -5,8 +5,6 @@
 package org.kyj.llmmanager;
 
 import org.kyj.llmmanager.service.*;
-import org.kyj.llmmanager.service.AppSettingsRepository;
-import org.kyj.llmmanager.service.DevHotReloader;
 
 /**
  * 앱 전역 싱글톤 컨텍스트. 모든 서비스 객체를 생성·보관하며 UI 레이어에 제공한다.
@@ -47,6 +45,8 @@ public class AppContext {
     private PluginCommandExecutor pluginCommandExecutor;
     /** 플러그인 런타임 의존성 설치 서비스. */
     private PluginDependencyInstaller pluginDependencyInstaller;
+    /** 위키 페이지 벡터 색인 서비스 (임베딩 + sqlite-vec). */
+    private WikiIndexService wikiIndexService;
 
     private AppContext() {}
 
@@ -97,6 +97,8 @@ public class AppContext {
             apiServer.start(settings.getApiServerHost(), settings.getApiServerPort());
         }
 
+        wikiIndexService = new WikiIndexService(appSettingsRepository);
+
         // JVM 강제 종료(Ctrl+C, SIGTERM) 시 실행 중인 서비스 프로세스를 정리한다.
         // 작업 관리자에서 kill -9 수준의 강제 종료는 훅이 실행되지 않는다.
         Runtime.getRuntime().addShutdownHook(new Thread(
@@ -123,6 +125,7 @@ public class AppContext {
         if (llmSkillInstaller != null) llmSkillInstaller.shutdown();
         if (systemMonitor != null) systemMonitor.stop();
         if (trayManager != null)   trayManager.remove();
+        if (wikiIndexService != null) wikiIndexService.close();
     }
 
     public AppSettingsRepository getAppSettingsRepository() { return appSettingsRepository; }
@@ -141,4 +144,5 @@ public class AppContext {
     public PluginManager getPluginManager() { return pluginManager; }
     public PluginCommandExecutor getPluginCommandExecutor() { return pluginCommandExecutor; }
     public PluginDependencyInstaller getPluginDependencyInstaller() { return pluginDependencyInstaller; }
+    public WikiIndexService getWikiIndexService() { return wikiIndexService; }
 }
