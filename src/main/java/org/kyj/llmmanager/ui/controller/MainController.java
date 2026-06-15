@@ -126,6 +126,8 @@ public class MainController implements Initializable {
     @FXML private VBox argsContainer;
     /** 설정 탭: 환경변수 입력 영역 */
     @FXML private VBox envVarsContainer;
+    /** 설정 탭: 앱 시작 시 서비스 자동 실행 여부 */
+    @FXML private CheckBox autoStartCheck;
 
     // ---- Install tab ----
     /** 설치 탭: 설치 경로 표시 레이블 */
@@ -494,6 +496,7 @@ public class MainController implements Initializable {
     private void refreshConfig() {
         if (selectedInstance == null) return;
         ServiceDefinition def = selectedInstance.getDefinition();
+        autoStartCheck.setSelected(def.isAutoStart());
         buildArgForm(def);
         buildEnvForm(def);
     }
@@ -619,6 +622,7 @@ public class MainController implements Initializable {
     private void onSaveConfig() {
         if (selectedInstance == null) return;
         ServiceDefinition def = selectedInstance.getDefinition();
+        def.setAutoStart(autoStartCheck.isSelected());
 
         // Save arg values
         for (Map.Entry<String, Control> entry : argControls.entrySet()) {

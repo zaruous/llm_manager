@@ -191,7 +191,10 @@ public class BuiltinServiceSetupController {
             enabledCb.setSelected(spec.isEnabled());
             argEnabledChecks.put(spec.getName(), enabledCb);
 
-            Label flagLbl = new Label(spec.getFlag());
+            String keyText = (spec.getFlag() != null && !spec.getFlag().isBlank())
+                    ? spec.getFlag()
+                    : spec.getName();
+            Label flagLbl = new Label(keyText);
             flagLbl.getStyleClass().add("arg-flag");
 
             String curVal = argValues != null
@@ -353,6 +356,7 @@ public class BuiltinServiceSetupController {
         def.setPort(sourceDef.getPort());
         def.setHealthCheckPath(sourceDef.getHealthCheckPath());
         def.setGroovyScript(sourceDef.getGroovyScript());
+        def.setAutoStart(sourceDef.isAutoStart());
         def.setBuiltin(true);
 
         def.setInstallDir(installDir);

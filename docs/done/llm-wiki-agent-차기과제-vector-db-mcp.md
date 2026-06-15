@@ -159,9 +159,11 @@ vector-index.db upsert  (page_path, chunk_id, type, tags, vector, content_hash)
 | `wiki_search` | query, topK, type? | Phase 5 벡터 색인 시맨틱 검색 → 페이지 요약 목록 | 색인 없으면 index.md 키워드 검색 폴백 |
 | `wiki_get_page` | path 또는 title | 페이지 본문(마크다운) 반환 | |
 | `wiki_overview` | — | `wiki/overview.md` + 통계(페이지 수·최근 갱신) | 에이전트의 첫 컨텍스트 파악용 |
-| `wiki_query` | question | `query.py` 래핑 — 종합 응답 생성 | LLM 호출 발생 → 도구 설명에 비용 명시 |
+| `wiki_query` | question | `wiki_search` 결과 청크를 질문 컨텍스트로 반환 | MCP 서버 내부 LLM 호출 없음 |
 | `wiki_ingest` | file_path 또는 content | 문서 수집 실행 | **쓰기 도구** — 기본 비활성, argSpec으로 opt-in |
 | `wiki_list_contradictions` | — | Contradictions 섹션이 있는 페이지 수집 | lint 결과 활용 |
+| `wiki_health` | save?, as_json? | 빈/스텁 파일, index.md 동기화, log.md ingest 누락 점검 | deterministic, LLM/API 호출 없음 |
+| `wiki_lint` | save?, include_semantic?, as_json? | 고아 페이지, 깨진 위키링크, 누락 엔티티 후보, sparse 페이지, Contradictions, graph.json 품질 점검 | deterministic. include_semantic은 안내만 포함 |
 
 > 쓰기 도구(`wiki_ingest`)는 외부 에이전트가 위키를 오염시킬 수 있으므로
 > 기본 비활성화하고, service-pack argSpec(`--enable-write` BOOLEAN)으로만 켠다.

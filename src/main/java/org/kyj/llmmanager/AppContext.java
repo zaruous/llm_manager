@@ -4,6 +4,8 @@
  */
 package org.kyj.llmmanager;
 
+import org.kyj.llmmanager.model.ServiceDefinition;
+import org.kyj.llmmanager.model.ServiceInstance;
 import org.kyj.llmmanager.service.*;
 
 /**
@@ -72,11 +74,12 @@ public class AppContext {
         serviceRegistry = new ServiceRegistry();
         serviceRegistry.load();
         logService = new LogService();
-        processManager = new ProcessManager(logService);
+        processManager = new ProcessManager(logService, appSettingsRepository);
         installationService = new InstallationService();
         healthMonitor = new HealthMonitor(processManager,
                 appSettingsRepository.get().getHealthCheckInterval());
         healthMonitor.start();
+        startAutoStartServices();
 
         llmSkillInstaller = new LlmSkillInstaller(
                 new LlmSkillLibraryRepository(appSettingsRepository.get()));
@@ -129,6 +132,22 @@ public class AppContext {
         if (systemMonitor != null) systemMonitor.stop();
         if (trayManager != null)   trayManager.remove();
         if (wikiIndexService != null) wikiIndexService.close();
+    }
+
+    /**
+     * 서비스별 자동 시작 옵션이 켜진 항목을 앱 시작 시 기동한다.
+     * 이미 PID 파일로 살아 있는 프로세스가 감지되면 새로 띄우지 않고 기존 프로세스에 연결한다.
+     */
+    private void startAutoStartServices() {
+        for (ServiceDefinition def : serviceRegistry.getAll()) {
+            if (!def.isAutoStart()) continue;
+            ServiceInstance inst = processManager.getOrCreate(def);
+            if (!installationService.isInstalled(def)) {
+                logService.addSystemLog(inst, "자동 시작 건너뜀: 설치되지 않은 서비스입니다.");
+                continue;
+            }
+            processManager.start(inst);
+        }
     }
 
     public AppSettingsRepository getAppSettingsRepository() { return appSettingsRepository; }

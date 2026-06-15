@@ -12,8 +12,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
+import java.util.jar.JarFile;
+import java.util.jar.Manifest;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -33,11 +38,19 @@ public class ProcessManager {
     /** 프로세스 stdout/stderr를 ServiceInstance 로그로 연결하는 서비스 */
     private final LogService logService;
 
+    /** 런타임 설정 저장소. Java 홈 설정을 서비스 실행에 반영한다. */
+    private final AppSettingsRepository settingsRepository;
+
     /** 서비스 상태가 바뀔 때 호출할 콜백. 트레이 메뉴 갱신 등에 사용. */
     private Runnable onStatusChange;
 
     public ProcessManager(LogService logService) {
+        this(logService, null);
+    }
+
+    public ProcessManager(LogService logService, AppSettingsRepository settingsRepository) {
         this.logService = logService;
+        this.settingsRepository = settingsRepository;
     }
 
     public void setOnStatusChange(Runnable callback) {
@@ -69,6 +82,30 @@ public class ProcessManager {
     }
 
     /**
+     * PID 파일에 남은 프로세스가 살아 있으면 현재 인스턴스에 연결한다.
+     * 비정상 종료 후 앱이 재시작될 때 같은 서비스를 중복 기동하지 않기 위한 처리다.
+     *
+     * @param instance 복원할 서비스 인스턴스
+     * @return 살아 있는 프로세스를 감지해 연결했으면 true
+     */
+    public boolean restoreFromPidFile(ServiceInstance instance) {
+        OptionalLong savedPid = PidFileManager.read(instance.getDefinition());
+        if (savedPid.isEmpty()) return false;
+
+        long pid = savedPid.getAsLong();
+        boolean alive = ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
+        if (!alive) {
+            PidFileManager.delete(instance.getDefinition());
+            return false;
+        }
+
+        instance.attachExternalPid(pid);
+        setStatus(instance, ServiceStatus.RUNNING);
+        logService.addSystemLog(instance, "기존 실행 프로세스를 감지했습니다 (PID=" + pid + ")");
+        return true;
+    }
+
+    /**
      * 서비스를 별도 스레드에서 시작한다. 이미 RUNNING/STARTING 이면 무시.
      *
      * @param instance 시작할 서비스 인스턴스
@@ -76,6 +113,7 @@ public class ProcessManager {
     public void start(ServiceInstance instance) {
         if (instance.getStatus() == ServiceStatus.RUNNING
                 || instance.getStatus() == ServiceStatus.STARTING) return;
+        if (restoreFromPidFile(instance)) return;
         new Thread(() -> doStart(instance), "start-" + instance.getDefinition().getName()).start();
     }
 
@@ -103,7 +141,12 @@ public class ProcessManager {
             if (!tokens.isEmpty()) {
                 String exe = tokens.get(0);
                 if (exe.equalsIgnoreCase("java") || exe.equalsIgnoreCase("java.exe")) {
-                    tokens.set(0, PlatformUtil.getCurrentJavaExecutable());
+                    String javaExecutable = resolveJavaExecutable(tokens, workDir);
+                    tokens.set(0, javaExecutable);
+                    logService.addSystemLog(instance,
+                            "Resolved Java executable: " + javaExecutable);
+                    logService.addSystemLog(instance,
+                            "Resolved command: " + String.join(" ", tokens));
                 }
             }
 
@@ -150,6 +193,213 @@ public class ProcessManager {
     }
 
     /**
+     * Java 서비스 실행에 사용할 java 실행 파일을 결정한다.
+     * <p>우선순위:
+     * <ol>
+     *   <li>설정의 Java 홈/JAVA_HOME</li>
+     *   <li>JAR Main-Class의 class version이 현재 런타임보다 높으면 설치된 호환 JDK 자동 탐색</li>
+     *   <li>현재 앱 JVM의 java 실행 파일</li>
+     * </ol>
+     *
+     * @param tokens 실행 토큰
+     * @param workDir 서비스 작업 디렉토리
+     * @return 사용할 java 실행 파일 경로
+     */
+    private String resolveJavaExecutable(List<String> tokens, String workDir) {
+        OptionalInt requiredMajor = requiredClassMajor(tokens, workDir);
+        Optional<String> configured = configuredJavaExecutable();
+        if (configured.isPresent()) {
+            if (requiredMajor.isEmpty()
+                    || javaExecutableClassMajor(Path.of(configured.get())) >= requiredMajor.getAsInt()) {
+                return configured.get();
+            }
+        }
+
+        String currentJava = PlatformUtil.getCurrentJavaExecutable();
+        int currentMajor = currentRuntimeClassMajor();
+        if (requiredMajor.isPresent() && requiredMajor.getAsInt() > currentMajor) {
+            Optional<String> compatible = findCompatibleJavaExecutable(requiredMajor.getAsInt());
+            if (compatible.isPresent()) {
+                return compatible.get();
+            }
+        }
+
+        return currentJava;
+    }
+
+    /**
+     * 설정된 Java 홈 또는 Java 명령어가 있으면 실행 파일 경로로 해석한다.
+     */
+    private Optional<String> configuredJavaExecutable() {
+        if (settingsRepository == null) return Optional.empty();
+
+        AppSettings settings = settingsRepository.get();
+        String exeName = PlatformUtil.isWindows() ? "java.exe" : "java";
+
+        String javaHome = settings.getJavaHome();
+        if (javaHome != null && !javaHome.isBlank()) {
+            Path candidate = Path.of(javaHome).resolve("bin").resolve(exeName);
+            if (Files.isRegularFile(candidate)) {
+                return Optional.of(candidate.toAbsolutePath().toString());
+            }
+        }
+
+        String javaCommand = settings.getJavaCommand();
+        if (javaCommand != null && !javaCommand.isBlank()
+                && !javaCommand.equalsIgnoreCase("java")
+                && !javaCommand.equalsIgnoreCase("java.exe")) {
+            Path commandPath = Path.of(javaCommand);
+            if (commandPath.isAbsolute() && Files.isRegularFile(commandPath)) {
+                return Optional.of(commandPath.toAbsolutePath().toString());
+            }
+            return Optional.of(javaCommand);
+        }
+
+        return Optional.empty();
+    }
+
+    /**
+     * java -jar 대상 JAR의 Main-Class class file major version을 읽는다.
+     */
+    private OptionalInt requiredClassMajor(List<String> tokens, String workDir) {
+        int jarArgIndex = -1;
+        for (int i = 0; i < tokens.size(); i++) {
+            if ("-jar".equalsIgnoreCase(tokens.get(i))) {
+                jarArgIndex = i + 1;
+                break;
+            }
+        }
+        if (jarArgIndex <= 0 || jarArgIndex >= tokens.size()) {
+            return OptionalInt.empty();
+        }
+
+        Path jarPath = Path.of(tokens.get(jarArgIndex));
+        if (!jarPath.isAbsolute() && workDir != null && !workDir.isBlank()) {
+            jarPath = Path.of(workDir).resolve(jarPath);
+        }
+        if (!Files.isRegularFile(jarPath)) {
+            return OptionalInt.empty();
+        }
+
+        try (JarFile jar = new JarFile(jarPath.toFile())) {
+            Manifest manifest = jar.getManifest();
+            if (manifest == null) return OptionalInt.empty();
+
+            String mainClass = manifest.getMainAttributes().getValue("Main-Class");
+            if (mainClass == null || mainClass.isBlank()) return OptionalInt.empty();
+
+            String entryName = mainClass.replace('.', '/') + ".class";
+            var entry = jar.getJarEntry(entryName);
+            if (entry == null) return OptionalInt.empty();
+
+            try (InputStream in = jar.getInputStream(entry)) {
+                byte[] header = in.readNBytes(8);
+                if (header.length < 8) return OptionalInt.empty();
+                int magic = ((header[0] & 0xff) << 24)
+                        | ((header[1] & 0xff) << 16)
+                        | ((header[2] & 0xff) << 8)
+                        | (header[3] & 0xff);
+                if (magic != 0xCAFEBABE) return OptionalInt.empty();
+                int major = ((header[6] & 0xff) << 8) | (header[7] & 0xff);
+                return OptionalInt.of(major);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to inspect Java class version for service jar", e);
+            return OptionalInt.empty();
+        }
+    }
+
+    /**
+     * 현재 앱 JVM이 인식하는 class file major version을 반환한다.
+     */
+    private int currentRuntimeClassMajor() {
+        try {
+            String classVersion = System.getProperty("java.class.version", "61");
+            return (int) Double.parseDouble(classVersion);
+        } catch (NumberFormatException e) {
+            return 61;
+        }
+    }
+
+    /**
+     * 설치된 JDK/JRE 후보 중 필요한 class file major version을 실행할 수 있는 java를 찾는다.
+     */
+    private Optional<String> findCompatibleJavaExecutable(int requiredMajor) {
+        Set<Path> candidates = new LinkedHashSet<>();
+        addJavaCandidate(candidates, System.getenv("JAVA_HOME"));
+        addJavaCandidate(candidates, "C:\\Program Files\\java\\jdk-21.0.2");
+        addJavaInstallRoot(candidates, Path.of("C:\\Program Files\\java"));
+        addJavaInstallRoot(candidates, Path.of("C:\\Program Files\\Eclipse Adoptium"));
+        addJavaInstallRoot(candidates, Path.of("C:\\Program Files\\Microsoft"));
+
+        for (Path candidate : candidates) {
+            int major = javaExecutableClassMajor(candidate);
+            if (major >= requiredMajor) {
+                return Optional.of(candidate.toAbsolutePath().toString());
+            }
+        }
+        return Optional.empty();
+    }
+
+    private void addJavaCandidate(Set<Path> candidates, String javaHome) {
+        if (javaHome == null || javaHome.isBlank()) return;
+        String exeName = PlatformUtil.isWindows() ? "java.exe" : "java";
+        Path javaExe = Path.of(javaHome).resolve("bin").resolve(exeName);
+        if (Files.isRegularFile(javaExe)) {
+            candidates.add(javaExe);
+        }
+    }
+
+    private void addJavaInstallRoot(Set<Path> candidates, Path root) {
+        if (!PlatformUtil.isWindows() || !Files.isDirectory(root)) return;
+        String exeName = PlatformUtil.isWindows() ? "java.exe" : "java";
+        try (var stream = Files.list(root)) {
+            stream
+                    .map(path -> path.resolve("bin").resolve(exeName))
+                    .filter(Files::isRegularFile)
+                    .forEach(candidates::add);
+        } catch (Exception e) {
+            log.debug("Failed to scan Java install root: {}", root, e);
+        }
+    }
+
+    private int javaExecutableClassMajor(Path javaExecutable) {
+        try {
+            Process process = new ProcessBuilder(javaExecutable.toString(), "-version")
+                    .redirectErrorStream(true)
+                    .start();
+            boolean finished = process.waitFor(3, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return 0;
+            }
+            String output = new String(process.getInputStream().readAllBytes());
+            OptionalInt feature = parseJavaFeatureVersion(output);
+            return feature.isPresent() ? feature.getAsInt() + 44 : 0;
+        } catch (Exception e) {
+            log.debug("Failed to check java version: {}", javaExecutable, e);
+            return 0;
+        }
+    }
+
+    private OptionalInt parseJavaFeatureVersion(String versionOutput) {
+        if (versionOutput == null || versionOutput.isBlank()) {
+            return OptionalInt.empty();
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("version\\s+\"(\\d+)(?:\\.(\\d+))?")
+                .matcher(versionOutput);
+        if (!matcher.find()) {
+            return OptionalInt.empty();
+        }
+        int first = Integer.parseInt(matcher.group(1));
+        if (first == 1 && matcher.group(2) != null) {
+            return OptionalInt.of(Integer.parseInt(matcher.group(2)));
+        }
+        return OptionalInt.of(first);
+    }
+
+    /**
      * 실행 중인 프로세스를 종료한다.
      * Windows는 taskkill /F, Unix는 destroy() 사용. 5초 대기 후 강제 종료.
      *
@@ -173,12 +423,12 @@ public class ProcessManager {
                 new Thread(() -> {
                     try {
                         logService.addSystemLog(instance, "고아 프로세스 종료 시도 (PID=" + pid + ")");
-                        if (PlatformUtil.isWindows()) {
-                            Runtime.getRuntime().exec(new String[]{"taskkill", "/F", "/PID", String.valueOf(pid)})
-                                    .waitFor(3, TimeUnit.SECONDS);
-                        } else {
-                            ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
-                        }
+                if (PlatformUtil.isWindows()) {
+                    Runtime.getRuntime().exec(new String[]{"taskkill", "/F", "/T", "/PID", String.valueOf(pid)})
+                            .waitFor(3, TimeUnit.SECONDS);
+                } else {
+                    ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+                }
                         PidFileManager.delete(def);
                         setStatus(instance, ServiceStatus.STOPPED);
                         logService.addSystemLog(instance, "Stopped.");
@@ -207,7 +457,7 @@ public class ProcessManager {
         new Thread(() -> {
             try {
                 if (PlatformUtil.isWindows()) {
-                    Runtime.getRuntime().exec(new String[]{"taskkill", "/F", "/PID",
+                    Runtime.getRuntime().exec(new String[]{"taskkill", "/F", "/T", "/PID",
                             String.valueOf(process.pid())});
                 } else {
                     process.destroy();
@@ -299,7 +549,7 @@ public class ProcessManager {
                 }
 
                 if (PlatformUtil.isWindows()) {
-                    new ProcessBuilder("taskkill", "/F", "/PID", String.valueOf(pid))
+                    new ProcessBuilder("taskkill", "/F", "/T", "/PID", String.valueOf(pid))
                             .start().waitFor(3, TimeUnit.SECONDS);
                 } else {
                     if (process != null) process.destroy();

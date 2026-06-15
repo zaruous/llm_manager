@@ -82,7 +82,8 @@ public class ServiceDetailDialog {
         addInfoRow(infoGrid, row++, "작업 디렉토리", nvl(def.getWorkingDir()));
         addInfoRow(infoGrid, row++, "시작 명령어", nvl(def.getStartCommand()));
         addInfoRow(infoGrid, row++, "포트",       def.getPort() != null ? String.valueOf(def.getPort()) : "-");
-        addInfoRow(infoGrid, row,   "헬스체크",   nvl(def.getHealthCheckPath()));
+        addInfoRow(infoGrid, row++, "헬스체크",   nvl(def.getHealthCheckPath()));
+        addInfoRow(infoGrid, row,   "자동 시작",  def.isAutoStart() ? "사용" : "미사용");
         root.getChildren().add(infoGrid);
 
         // ── 실행 인수 섹션 ─────────────────────────────────────────────
@@ -130,7 +131,10 @@ public class ServiceDetailDialog {
                         + (on ? "#44BB44" : "#555566") + ";");
 
                 // 플래그 — 활성 여부에 따라 CSS 클래스 분기
-                Label flagLbl = new Label(spec.getFlag());
+                String keyText = (spec.getFlag() != null && !spec.getFlag().isBlank())
+                        ? spec.getFlag()
+                        : spec.getName();
+                Label flagLbl = new Label(keyText);
                 flagLbl.getStyleClass().add(on ? "arg-flag" : "arg-flag-disabled");
 
                 // 값

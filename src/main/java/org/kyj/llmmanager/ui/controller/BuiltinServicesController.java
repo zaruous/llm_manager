@@ -108,7 +108,10 @@ public class BuiltinServicesController {
             for (ArgSpec spec : def.getArgSpecs()) {
                 HBox row = new HBox(8);
                 row.setPadding(new Insets(2, 0, 2, 0));
-                Label flag = new Label(spec.getFlag());
+                String keyText = (spec.getFlag() != null && !spec.getFlag().isBlank())
+                        ? spec.getFlag()
+                        : spec.getName();
+                Label flag = new Label(keyText);
                 flag.setMinWidth(120);
                 flag.setStyle("-fx-text-fill: #88aadd; -fx-font-family: monospace;");
                 Label desc = new Label(spec.getDescription()

@@ -97,6 +97,15 @@ public class InstallationService {
                 }
             }
 
+            if ((def.getRepoUrl() == null || def.getRepoUrl().isBlank())
+                    && def.getInstallDir() != null && !def.getInstallDir().isBlank()) {
+                Path installPath = Path.of(def.getInstallDir());
+                if (!Files.exists(installPath)) {
+                    Files.createDirectories(installPath);
+                    emit(cb, "Created install directory: " + installPath);
+                }
+            }
+
             // Step 2: run install commands
             String workDir = def.getWorkingDir() != null ? def.getWorkingDir() : def.getInstallDir();
             for (String cmd : def.getInstallCommands()) {

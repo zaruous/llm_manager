@@ -22,7 +22,7 @@ public class ServiceCustomizer {
     /**
      * Groovy 스크립트를 실행하고 def 객체를 직접 수정한다.
      * 바인딩 변수: service(ServiceDefinition), os(windows/mac/linux),
-     * userHome, arch(x64/arm64), env(클로저).
+     * userHome, arch(x64/arm64), pluginsDir(플러그인 디렉토리 절대 경로), env(클로저).
      *
      * @param def          수정할 서비스 정의
      * @param groovyScript 실행할 Groovy 스크립트 문자열

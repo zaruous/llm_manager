@@ -2,6 +2,7 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Separator?>
@@ -60,19 +61,23 @@
               <Label text="설치 명령어" GridPane.columnIndex="0" GridPane.rowIndex="6" />
               <TextArea fx:id="installCommandsArea" maxWidth="Infinity" prefHeight="60" promptText="줄마다 명령어 하나 (예: pip install -r requirements.txt)" wrapText="true" GridPane.columnIndex="1" GridPane.rowIndex="6" />
       
-              <Label text="포트" GridPane.columnIndex="0" GridPane.rowIndex="7" />
-              <TextField fx:id="portField" prefWidth="100" promptText="예: 3000" GridPane.columnIndex="1" GridPane.rowIndex="7" />
-            <rowConstraints>
+               <Label text="포트" GridPane.columnIndex="0" GridPane.rowIndex="7" />
+               <TextField fx:id="portField" prefWidth="100" promptText="예: 3000" GridPane.columnIndex="1" GridPane.rowIndex="7" />
+
+               <Label text="시작 옵션" GridPane.columnIndex="0" GridPane.rowIndex="8" />
+               <CheckBox fx:id="autoStartCheck" text="LLM Manager 시작 시 자동 실행" GridPane.columnIndex="1" GridPane.rowIndex="8" />
+             <rowConstraints>
+                <RowConstraints />
+                <RowConstraints />
                <RowConstraints />
                <RowConstraints />
                <RowConstraints />
                <RowConstraints />
-               <RowConstraints />
-               <RowConstraints />
-               <RowConstraints />
-               <RowConstraints />
-            </rowConstraints>
-          </GridPane>
+                <RowConstraints />
+                <RowConstraints />
+                <RowConstraints />
+             </rowConstraints>
+           </GridPane>
       
           <!-- 실행 인수 (argSpecs 있을 때만 표시) -->
           <VBox fx:id="argSpecsPane" managed="false" spacing="6" visible="false">
