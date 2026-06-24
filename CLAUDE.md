@@ -94,109 +94,39 @@ LLMManager/
 `BuiltinServiceSetupController.setup()`이 서비스 등록 화면을 열 때 `pluginSettings`에서 초기값을 읽어 `argValues`에 주입한다. 등록 완료 후에는 `ServiceDefinition.argValues`가 단일 정보 원천이며, 플러그인 전역 설정을 다시 읽지 않는다.
 
 ```
-신규 등록 시:  pluginSettings["wiki.defaultCwd"]  →  argValues["workspace"]  (초기값 복사)
-등록 이후:     argValues["workspace"]  (단일 원천, 서비스마다 독립)
+신규 등록 시:  pluginSettings[key]  →  argValues[key]  (초기값 복사)
+등록 이후:     argValues[key]  (단일 원천, 서비스 인스턴스마다 독립)
 ```
 
 **2. 서비스 인스턴스 식별 — `ServiceDefinition.packId`**
 
-- YAML 템플릿 def: `id="wiki-mcp"`, `packId=null`
-- 등록된 인스턴스: `id=UUID`, `packId="wiki-mcp"`
+- YAML 템플릿 def: `id="<팩명>"`, `packId=null`
+- 등록된 인스턴스: `id=UUID`, `packId="<팩명>"`
 - `packId`는 `buildDefinition()`에서 `sourceDef.getId()`를 복사해 설정한다
+- `ServiceRegistry.findByPackId()`로 동일 팩에서 생성된 인스턴스 목록을 조회한다
 
-**3. 플러그인-서비스 1:1 연동 — `linkedServiceType` / `linkedServiceId`**
+**3. 플러그인-서비스 연동 — `linkedServiceType` / `linkedServiceId`**
 
-- `plugin.json` 최상위 `linkedServiceType` 필드로 연동할 서비스 팩을 선언한다 (예: `"wiki-mcp"`)
+- `plugin.json` 최상위 `linkedServiceType` 필드로 연동할 서비스 팩을 선언한다
 - `PluginManager.getCommands(ServiceRegistry)`는 해당 `packId` 서비스가 **정확히 1개**일 때만 `PluginCommandContribution.linkedServiceId`를 채운다
-- 0개 또는 2개 이상이면 `linkedServiceId=null` — 다이얼로그는 플러그인 전역 설정으로 폴백한다
-
-**4. `resolveWorkspace()` 결정 순서**
-
-위키 다이얼로그(`WikiQueryDialog`, `WikiIngestDialog`, `WikiBrowserDialog`)는 항상 아래 순서로 워크스페이스를 결정한다:
-
-```
-1. contribution.linkedServiceId() != null
-       → serviceRegistry.findById(id).argValues["workspace"]
-2. (linkedServiceId == null)
-       → pluginSettings[contribution.pluginId()]["wiki.defaultCwd"]
-```
-
-`contribution`이 null이면 빈 문자열을 반환한다.
+- 0개 또는 2개 이상이면 `linkedServiceId=null` — 플러그인 전역 설정으로 폴백한다
 
 ---
 
-## 빌드 상태
+## 현재 구현 기능
 
-`./gradlew build` 정상 통과 (2026-06-25 기준).
+`./gradlew build` 정상 통과 (2026-06-24 기준).
 
-- `BuiltinServiceLoader` 제거 → `ServicePackLoader`로 일원화
-- `service-packs/` 디렉토리: `bgem3-embedding.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`
-- `bgem3-embedding.yml`: CUDA 자동 감지(CUDA_PATH + nvcc), install-type/cuda-version argSpec 추가
-- 서비스 목록 우클릭 컨텍스트 메뉴에 "제거" 기능 추가
-- HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 의존성으로 `LlmSkillLibraryRepository` 컴파일
+| 기능 영역 | 주요 클래스·파일 | 비고 |
+|-----------|-----------------|------|
+| 서비스 관리 | `ServicePackLoader`, `ServiceRegistry`, `ServiceRunner` | `service-packs/*.yml` 기반 등록·시작·중지·로그 |
+| 스킬 팩 설치 | `SkillPackInstaller`, `tools.json` | Claude/Copilot/Cursor/Gemini/Wiki-Agent |
+| 플러그인 시스템 | `PluginManager`, `PluginCommandExecutor` | `plugins/` 디렉토리 declarative 플러그인, Cursor 에이전트 러너 |
+| LLM Wiki Agent | `plugins/wiki-agent/`, `WikiWorkspaceInitializer` | ingest/query/browse/health; 서비스별 워크스페이스(`argValues`) |
+| 시스템 모니터 | `SystemMonitorService` | 관리 메모리(RSS) 게이지, 2초 주기 갱신 |
+| 스킬 라이브러리 | `LlmSkillLibraryRepository` | HikariCP + SQLite; UI "로드" 탭은 파일 복사 (DB 미연결) |
 
-현재 UI의 "로드" 탭은 선택 파일을 대상 프로젝트에 복사한다 (DB 저장은 미연결).
-
-### LLM Wiki Agent 통합 (2026-06-12)
-
-`docs/done/llm-wiki-agent-통합계획.md`의 Phase 0~4 구현 완료 (완료 문서는 `docs/done/`에 보관).
-
-- 스킬 팩: `tools.json`에 `wiki-agent` 도구 추가 (워크스페이스 골격/Claude/Gemini/Codex 팩)
-- 플러그인: `plugins/wiki-agent/` — wiki.ingest/query/health/lint/graph/openGraph 커맨드
-- `PluginCommandExecutor.runWikiTool()`은 워크스페이스 검증·tools 동기화 후 항상
-  Cursor Agent에 위임한다 (v0.2.0에서 Python/litellm + ANTHROPIC_API_KEY 직접 실행 경로 제거)
-- 업스트림 Python 도구(tools/*.py)는 그래프 빌드 등에서 에이전트가 활용할 수 있도록
-  실행 전 플러그인 tools/를 워크스페이스 `tools/`로 동기화한다
-- 전용 UI: `WikiQueryDialog`(CLI 세션형 — 이력은 워크스페이스 `.llm-manager/query-history.json`),
-  `WikiIngestDialog`(멀티 파일/폴더 선택 → raw/분류 복사 → `WikiIngestPlanner` 작업 계획
-  순차 실행 + 프로그레스바; 작은 파일 배치 / 큰 텍스트 섹션 노트→병합 / 큰 PDF는
-  `WikiPageExtractor`+`tools/extract_pages.py`(pymupdf)로 페이지 이미지 전처리 후
-  5페이지씩 이미지 판독→병합, 실패 시 단계 처리 폴백;
-  raw 불변 복사·지원 확장자 필터·기수집 스킵·실행 전 횟수 확인),
-  `WikiBrowserDialog`(트리 + WebView 마크다운 뷰, `[[WikiLink]]` 앱 내 이동 — help-template.html 재사용)
-- 도움말에 "LLM Wiki Agent" 항목 추가 (`docs/wiki-agent.md`)
-- 실행 경로는 cursor 전용 — Cursor 사이드카에 자연어 위임(`runWikiViaCursorAgent`),
-  AGENTS.md 자동 설치, 필수 env는 `CURSOR_API_KEY` (plugin.json requires.env에 선언)
-- 실행 제어: `timeoutMinutes` 설정(기본 무제한), 중지 버튼은
-  `PluginCommandExecutor.cancel(commandId)` → `destroyProcessTree()`로 자식까지 종료.
-  워크스페이스 선택은 `wiki.defaultCwd`에 자동 영속화(`WikiWorkspaceInitializer.rememberWorkspace`).
-  사이드카 env 화이트리스트에 APPDATA 필수 — 없으면 `npm root -g`가 깨져 글로벌 SDK 탐색 실패
-
-### 위키 서비스별 워크스페이스 설정 (2026-06-24, claude/tag-build-failure-cwh073)
-
-전역 `wiki.defaultCwd` → 서비스 인스턴스별 `argValues["workspace"]` 아키텍처 전환.
-
-- **`ServiceDefinition.packId`**: 원본 서비스 팩 id 추적 필드 추가 (`buildDefinition()`에서 주입)
-- **`PluginManifest.linkedServiceType`**: 플러그인이 연동하는 서비스 팩 선언 (`plugin.json` 최상위)
-- **`ServiceRegistry.findById()` / `findByPackId()`**: 서비스 조회 헬퍼 추가
-- **`PluginManager.getCommands(ServiceRegistry)`**: `linkedServiceId` 해석 오버로드 추가
-- **`WikiWorkspaceInitializer.rememberWorkspace(ServiceRegistry, ...)`**: 서비스 argValues 갱신 오버로드
-- **`BuiltinServiceSetupController`**: wiki-mcp 등록 화면에서 `wiki.defaultCwd` → `argValues["workspace"]` 초기값 주입
-- **위키 다이얼로그 3종**: `resolveWorkspace()` 추가 — linkedServiceId → argValues → 전역 설정 순서로 결정
-- **`plugin.json`**: `"linkedServiceType": "wiki-mcp"` 추가, `wiki.defaultCwd` 설명 갱신
-
-### Wiki Vector MCP + 버그 수정 (2026-06-25, feature/wiki-vector-mcp)
-
-- **wiki_ingest 파라미터 재설계**: `title`, `content`, `desc=""`, `tags=""` — 저장 시 YAML
-  frontmatter(`title`·`desc`·`tags`·`ingest_at`) + 마크다운 본문으로 스테이징 파일 생성
-- **AGENTS.md 번들링 3중 보장**
-  - `WikiWorkspaceInitializer` SKELETON 맵에 `/llm-skills/wiki-agent/AGENTS.md` 추가
-  - `server.py`: 워크스페이스에 AGENTS.md 없으면 번들 파일에서 자동 복사
-  - `wiki-mcp.yml` Groovy 스크립트: 설치 시 `plugins/wiki-agent/AGENTS.md` → installDir 복사
-- **워크스페이스 초기화 UX**
-  - `WikiBrowserDialog`: `wiki/index.md` 없으면 초기화 확인 → `WikiWorkspaceInitializer.initialize()`
-  - `WikiQueryDialog`: 워크스페이스 미초기화 시 submit 전 확인 다이얼로그
-  - `SettingsDialog`: `wiki.defaultCwd` 저장 시 미초기화 워크스페이스이면 초기화 제안
-- **워크스페이스 찾기 버튼 제거**: `WikiQueryDialog`·`WikiIngestDialog`에서 제거
-  (설정 → 환경설정에서 일원화, `WikiBrowserDialog`만 유지)
-- **버그 수정**
-  - `onUninstall()`: 실행 중 제거 동의 시 `stop()` 먼저 호출 (PID 잔류 방지)
-  - WebView `IllegalAccessError`: `build.gradle`에 `--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED` 추가 (applicationDefaultJvmArgs·startScripts·jpackage 세 곳)
-- **관리 메모리 게이지** (대시보드 시스템 리소스 패널)
-  - "JVM 힙" → "관리 메모리": OSHI `OperatingSystem.getProcess(pid).getResidentSetSize()` 합산
-  - `SystemMonitorService`: `trackedPids[]` + `managedRss` volatile 필드, 백그라운드 `collect()`에서 2초마다 RSS 합산
-  - `MainController.refreshTrackedPids()`: `updateSystemStats()` (2초 주기 Timeline) 에서 호출해 PID 설정 타이밍과 무관하게 항상 최신 목록 유지
-  - 실행 중 서비스 없으면 "서비스 없음" 표시
+**배포 주의사항**: jpackage는 번들 JRE에서 `java.exe`를 제거한다. `build.gradle`의 `copyJavaExeToRuntime()`이 빌드 JDK에서 `runtime/bin/`으로 복사한다. WebView 사용 시 `--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED`이 applicationDefaultJvmArgs·startScripts·jpackage 세 곳에 모두 필요하다.
 
 ---
 
