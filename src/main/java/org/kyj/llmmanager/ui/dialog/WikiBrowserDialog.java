@@ -591,17 +591,20 @@ public class WikiBrowserDialog {
      * 워크스페이스 초기값을 결정한다.
      * linkedServiceId가 있으면 해당 서비스의 argValues["workspace"]를 사용하고,
      * 없으면 전역 plugin 설정의 wiki.defaultCwd로 폴백한다.
+     *
+     * @return 결정된 워크스페이스 경로 (없으면 빈 문자열)
      */
     private String resolveWorkspace() {
+        if (contribution == null) return "";
         var ctx = AppContext.getInstance();
-        if (contribution != null && contribution.linkedServiceId() != null) {
+        if (contribution.linkedServiceId() != null) {
             return ctx.getServiceRegistry()
                     .findById(contribution.linkedServiceId())
                     .map(def -> def.getArgValues().getOrDefault("workspace", ""))
                     .orElse("");
         }
         return ctx.getAppSettingsRepository()
-                .get().getPluginSetting("wiki-agent", "wiki.defaultCwd", "");
+                .get().getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
     }
 
     private String readResource(String path) throws Exception {

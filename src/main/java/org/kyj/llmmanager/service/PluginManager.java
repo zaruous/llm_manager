@@ -99,6 +99,8 @@ public class PluginManager {
     /**
      * 서비스 레지스트리 없이 커맨드 목록을 반환한다. linkedServiceId는 항상 null.
      * PluginCommandRunDialog·PluginCommandExecutor처럼 서비스 연동이 불필요한 호출 지점용.
+     *
+     * @return 커맨드 기여 목록 (플러그인명·커맨드 제목 순 정렬)
      */
     public List<PluginCommandContribution> getCommands() {
         return getCommands(null);
@@ -229,11 +231,18 @@ public class PluginManager {
             PluginSettingsTab tab
     ) {}
 
+    /**
+     * 플러그인 커맨드 기여 정보.
+     *
+     * @param pluginId        플러그인 고유 ID
+     * @param pluginName      사용자에게 보이는 플러그인 표시 이름
+     * @param command         커맨드 정의
+     * @param linkedServiceId 연결된 서비스 인스턴스 UUID; 연동 서비스가 없거나 복수이면 null
+     */
     public record PluginCommandContribution(
             String pluginId,
             String pluginName,
             PluginCommand command,
-            /** 연결된 서비스 인스턴스 UUID. 연동 서비스가 없거나 복수이면 null. */
             String linkedServiceId
     ) {}
 }
