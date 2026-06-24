@@ -126,6 +126,8 @@ public class MainController implements Initializable {
     @FXML private VBox argsContainer;
     /** 설정 탭: 환경변수 입력 영역 */
     @FXML private VBox envVarsContainer;
+    /** 설정 탭: 앱 시작 시 서비스 자동 실행 여부 */
+    @FXML private CheckBox autoStartCheck;
 
     // ---- Install tab ----
     /** 설치 탭: 설치 경로 표시 레이블 */
@@ -494,6 +496,7 @@ public class MainController implements Initializable {
     private void refreshConfig() {
         if (selectedInstance == null) return;
         ServiceDefinition def = selectedInstance.getDefinition();
+        autoStartCheck.setSelected(def.isAutoStart());
         buildArgForm(def);
         buildEnvForm(def);
     }
@@ -619,6 +622,7 @@ public class MainController implements Initializable {
     private void onSaveConfig() {
         if (selectedInstance == null) return;
         ServiceDefinition def = selectedInstance.getDefinition();
+        def.setAutoStart(autoStartCheck.isSelected());
 
         // Save arg values
         for (Map.Entry<String, Control> entry : argControls.entrySet()) {
@@ -837,7 +841,7 @@ public class MainController implements Initializable {
         if (selectedInstance == null) return;
         ServiceDefinition def = selectedInstance.getDefinition();
 
-        // 서비스가 실행 중이면 먼저 경고 확인
+        // 서비스가 실행 중이면 먼저 중지 여부 확인
         if (selectedInstance.getStatus() == ServiceStatus.RUNNING
                 || selectedInstance.getStatus() == ServiceStatus.STARTING) {
             Alert warn = new Alert(Alert.AlertType.WARNING,
@@ -846,6 +850,8 @@ public class MainController implements Initializable {
             warn.setTitle("실행 중 제거 경고");
             Optional<ButtonType> result = warn.showAndWait();
             if (result.isEmpty() || result.get() != ButtonType.YES) return;
+            // 사용자가 제거에 동의한 경우 프로세스를 먼저 종료
+            ctx.getProcessManager().stop(selectedInstance);
         }
 
         // installDir이 있으면 런타임 타입과 무관하게 디렉토리 삭제 여부 확인
@@ -1523,6 +1529,18 @@ public class MainController implements Initializable {
         long running = instanceList.stream()
                 .filter(i -> i.getStatus() == ServiceStatus.RUNNING).count();
         statusBarLabel.setText("서비스: " + instanceList.size() + "개  |  실행중: " + running + "개");
+        refreshTrackedPids();
+    }
+
+    /** RUNNING 상태 서비스의 PID 목록을 SystemMonitorService에 전달한다. */
+    private void refreshTrackedPids() {
+        SystemMonitorService mon = ctx == null ? null : ctx.getSystemMonitor();
+        if (mon == null) return;
+        long[] pids = instanceList.stream()
+                .filter(i -> i.getStatus() == ServiceStatus.RUNNING && i.getPid() > 0)
+                .mapToLong(ServiceInstance::getPid)
+                .toArray();
+        mon.setTrackedPids(pids);
     }
 
     // =========================================================
@@ -1537,6 +1555,8 @@ public class MainController implements Initializable {
         if (ctx == null || cpuBar == null) return;
         SystemMonitorService mon = ctx.getSystemMonitor();
         if (mon == null) return;
+        // 2초 주기마다 PID 목록을 갱신 — 대시보드 카드에서 시작했거나 PID가 늦게 설정된 경우를 포함
+        refreshTrackedPids();
 
         // ── CPU ──────────────────────────────────────────────
         double cpu = Math.max(0, Math.min(1, mon.getCpuLoad()));
@@ -1556,17 +1576,17 @@ public class MainController implements Initializable {
                 SystemMonitorService.formatBytes(totalMem),
                 memRatio * 100));
 
-        // ── JVM 힙 ───────────────────────────────────────────
-        Runtime rt      = Runtime.getRuntime();
-        long jvmUsed    = rt.totalMemory() - rt.freeMemory();
-        long jvmMax     = rt.maxMemory();
-        double jvmRatio = jvmMax > 0 ? (double) jvmUsed / jvmMax : 0;
-        jvmBar.setProgress(jvmRatio);
-        jvmBar.setStyle("-fx-accent: " + gaugeColor(jvmRatio) + ";");
-        jvmLabel.setText(String.format("%s / %s  (%4.1f %%)",
-                SystemMonitorService.formatBytes(jvmUsed),
-                SystemMonitorService.formatBytes(jvmMax),
-                jvmRatio * 100));
+        // ── 관리 메모리 (실행 중인 서비스 프로세스 RSS 합계) ──
+        long rssUsed  = mon.getManagedRss();
+        double rssRatio = totalMem > 0 ? (double) rssUsed / totalMem : 0;
+        jvmBar.setProgress(rssRatio);
+        jvmBar.setStyle("-fx-accent: " + gaugeColor(rssRatio) + ";");
+        jvmLabel.setText(rssUsed > 0
+                ? String.format("%s / %s  (%4.1f %%)",
+                        SystemMonitorService.formatBytes(rssUsed),
+                        SystemMonitorService.formatBytes(totalMem),
+                        rssRatio * 100)
+                : "서비스 없음");
     }
 
     /**

@@ -163,6 +163,11 @@ public class PluginCommandExecutor {
             return openGraphHtml(workspace);
         }
 
+        // 벡터 재색인 — Cursor Agent 없이 앱 내부에서 직접 처리
+        if ("wiki.reindex".equals(command.getId())) {
+            return reindexWorkspace(workspace, onOutput);
+        }
+
         LoadedPlugin plugin = pluginManager.findPlugin(pluginId);
         if (plugin == null) {
             return PluginCommandResult.error("플러그인 디렉토리를 찾을 수 없습니다: " + pluginId);
@@ -183,7 +188,46 @@ public class PluginCommandExecutor {
             return PluginCommandResult.error("도구 동기화 실패: " + e.getMessage());
         }
 
-        return runWikiViaCursorAgent(command, request, workspace, onOutput);
+        PluginCommandResult result = runWikiViaCursorAgent(command, request, workspace, onOutput);
+        // ingest 성공 후 벡터 색인을 비동기로 자동 갱신한다
+        if ("wiki.ingest".equals(command.getId()) && result.success()) {
+            triggerAsyncReindex(workspace, onOutput);
+        }
+        return result;
+    }
+
+    /**
+     * 워크스페이스 벡터 색인을 백그라운드 스레드에서 실행한다.
+     * 임베딩 서버 미기동 시에도 앱 UI를 블로킹하지 않는다.
+     *
+     * @param workspace 위키 워크스페이스 경로
+     * @param onOutput  진행 메시지 콜백
+     */
+    private void triggerAsyncReindex(Path workspace, Consumer<String> onOutput) {
+        org.kyj.llmmanager.AppContext ctx = org.kyj.llmmanager.AppContext.getInstance();
+        WikiIndexService wikiIndexService = ctx.getWikiIndexService();
+        if (wikiIndexService == null) return;
+        // 데몬 스레드로 실행 — 앱 종료를 막지 않는다
+        Thread t = new Thread(() -> wikiIndexService.indexWorkspace(workspace, onOutput));
+        t.setDaemon(true);
+        t.setName("wiki-reindex");
+        t.start();
+    }
+
+    /**
+     * 워크스페이스 벡터 색인을 즉시 백그라운드에서 실행하고 결과를 onOutput으로 전달한다.
+     *
+     * @param workspace 위키 워크스페이스 경로
+     * @param onOutput  진행 메시지 콜백
+     * @return 색인 시작 안내 결과
+     */
+    private PluginCommandResult reindexWorkspace(Path workspace, Consumer<String> onOutput) {
+        if (!Files.isRegularFile(workspace.resolve("wiki").resolve("index.md"))) {
+            return PluginCommandResult.error(
+                    "위키 워크스페이스가 아닙니다 (wiki/index.md 없음): " + workspace);
+        }
+        triggerAsyncReindex(workspace, onOutput);
+        return PluginCommandResult.info("벡터 재색인을 백그라운드에서 시작했습니다. 출력창을 확인해 주세요.");
     }
 
     /**

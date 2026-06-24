@@ -6,6 +6,7 @@ package org.kyj.llmmanager.ui.dialog;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kyj.llmmanager.AppContext;
+import org.kyj.llmmanager.service.WikiIndexService;
 import org.kyj.llmmanager.service.WikiMarkdownUtils;
 import org.kyj.llmmanager.util.SceneFactory;
 
@@ -93,6 +94,7 @@ public class WikiBrowserDialog {
     /** 뒤로 가기 스택 — 현재 표시 중인 페이지 경로를 push한다. */
     private final Deque<Path> backStack = new ArrayDeque<>();
 
+    private Stage stage;
     private Path workspace;
     private Path currentPage;
     private WebView webView;
@@ -112,7 +114,7 @@ public class WikiBrowserDialog {
     }
 
     public void show() {
-        Stage stage = new Stage();
+        stage = new Stage();
         stage.initOwner(owner);
         stage.initModality(Modality.NONE);
         stage.setTitle("위키 브라우저");
@@ -204,8 +206,17 @@ public class WikiBrowserDialog {
         searchField.textProperty().addListener((obs, old, value) -> {
             if (value == null || value.isBlank()) rebuildTree();
         });
+        HBox.setHgrow(searchField, Priority.ALWAYS);
 
-        VBox left = new VBox(8, searchField, treeView);
+        // 시맨틱 검색 버튼 — bgem3-embedding + 벡터 색인이 있을 때 유효
+        Button semanticBtn = new Button("~");
+        semanticBtn.setTooltip(new javafx.scene.control.Tooltip(
+                "시맨틱 검색 (벡터 유사도 — bgem3-embedding 서비스와 벡터 색인 필요)"));
+        semanticBtn.setOnAction(e -> runSemanticSearch(searchField.getText()));
+
+        HBox searchBar = new HBox(4, searchField, semanticBtn);
+
+        VBox left = new VBox(8, searchBar, treeView);
         left.setPadding(new Insets(0, 0, 0, 0));
         VBox.setVgrow(treeView, Priority.ALWAYS);
 
@@ -245,8 +256,10 @@ public class WikiBrowserDialog {
         Path wikiDir = workspace.resolve("wiki");
         if (!Files.isRegularFile(wikiDir.resolve("index.md"))) {
             treeView.setRoot(root);
-            renderMessage("위키 워크스페이스가 아닙니다 (wiki/index.md 없음): " + workspace);
-            return;
+            if (!offerInitialize(workspace)) {
+                renderMessage("위키 워크스페이스가 아닙니다 (wiki/index.md 없음): " + workspace);
+                return;
+            }
         }
         // 유효한 워크스페이스는 기억해 다음에 모든 위키 다이얼로그의 기본값으로 복원
         org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
@@ -350,6 +363,46 @@ public class WikiBrowserDialog {
             results.addAll(contentHits);
             Platform.runLater(() -> showSearchResults(keyword, results));
         }, "wiki-search").start();
+    }
+
+    /**
+     * 벡터 유사도 기반 시맨틱 검색을 백그라운드에서 실행한다.
+     * bgem3-embedding 서비스 미기동 또는 색인 미구축 시 키워드 검색으로 폴백한다.
+     *
+     * @param query 자연어 검색어
+     */
+    private void runSemanticSearch(String query) {
+        if (query == null || query.isBlank()) {
+            rebuildTree();
+            return;
+        }
+        if (workspace == null) {
+            runSearch(query);
+            return;
+        }
+        org.kyj.llmmanager.service.WikiIndexService svc =
+                AppContext.getInstance().getWikiIndexService();
+        if (svc == null || svc.countChunks(workspace) == 0) {
+            // 색인 미구축 시 키워드 검색 폴백
+            runSearch(query);
+            return;
+        }
+        new Thread(() -> {
+            var results = svc.search(workspace, query, 20);
+            if (results.isEmpty()) {
+                Platform.runLater(() -> runSearch(query));
+                return;
+            }
+            List<PageNode> pageNodes = results.stream()
+                    .map(r -> {
+                        Path file = workspace.resolve(r.pagePath().replace('/', java.io.File.separatorChar));
+                        String label = r.pagePath();
+                        return new PageNode(label, Files.isRegularFile(file) ? file : null);
+                    })
+                    .distinct()
+                    .toList();
+            Platform.runLater(() -> showSearchResults("~" + query, pageNodes));
+        }, "wiki-semantic-search").start();
     }
 
     private void showSearchResults(String keyword, List<PageNode> results) {
@@ -499,6 +552,30 @@ public class WikiBrowserDialog {
                 java.awt.Desktop.getDesktop().browse(java.net.URI.create(uri));
             }
         } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * wiki/index.md가 없을 때 골격 초기화를 제안하고 수락 시 생성한다.
+     *
+     * @param workspace 초기화할 워크스페이스 경로
+     * @return 초기화 성공 여부 (취소 또는 실패 시 false)
+     */
+    private boolean offerInitialize(Path workspace) {
+        javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
+                javafx.scene.control.Alert.AlertType.CONFIRMATION);
+        alert.initOwner(stage);
+        alert.setTitle("위키 골격 초기화");
+        alert.setHeaderText("이 디렉토리에 위키 골격(wiki/index.md)이 없습니다.");
+        alert.setContentText("raw/, wiki/, graph/ 골격을 지금 생성할까요?\n" + workspace);
+        var result = alert.showAndWait();
+        if (result.isEmpty() || result.get() != javafx.scene.control.ButtonType.OK) return false;
+        try {
+            org.kyj.llmmanager.service.WikiWorkspaceInitializer.initialize(workspace);
+            return true;
+        } catch (Exception ex) {
+            renderMessage("[오류] 골격 초기화 실패: " + ex.getMessage());
+            return false;
         }
     }
 

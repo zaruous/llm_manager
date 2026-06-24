@@ -7,6 +7,7 @@ package org.kyj.llmmanager.service;
 import oshi.SystemInfo;
 import oshi.hardware.CentralProcessor;
 import oshi.hardware.GlobalMemory;
+import oshi.software.os.OperatingSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,11 +27,16 @@ public class SystemMonitorService {
     private CentralProcessor processor;
     /** OSHI 메모리 정보 */
     private GlobalMemory memory;
+    /** OSHI OS 정보 — 프로세스 RSS 조회에 사용 */
+    private OperatingSystem os;
     /** CPU 측정 간격 계산용 이전 틱 스냅샷 */
     private long[] prevTicks;
 
     /** 2초 간격 수집 스케줄러 */
     private ScheduledExecutorService scheduler;
+
+    /** 관리 중인 서비스 PID 목록 — 컨트롤러가 서비스 상태 변경 시 갱신 */
+    private volatile long[] trackedPids = new long[0];
 
     // ── 최신 측정값 (volatile: 백그라운드 → JavaFX 스레드 가시성 보장) ──
     /** 시스템 CPU 사용률 (0.0 ~ 1.0) */
@@ -45,6 +51,8 @@ public class SystemMonitorService {
     private volatile int    physicalCores = 0;
     /** OS 이름 */
     private volatile String osName = "";
+    /** 관리 중인 서비스 프로세스의 RSS 합계 (bytes) */
+    private volatile long   managedRss = 0;
 
     /**
      * OSHI를 초기화하고 2초 간격 수집을 시작한다.
@@ -55,10 +63,11 @@ public class SystemMonitorService {
             SystemInfo si = new SystemInfo();
             processor    = si.getHardware().getProcessor();
             memory       = si.getHardware().getMemory();
+            os           = si.getOperatingSystem();
             prevTicks    = processor.getSystemCpuLoadTicks();
             logicalCores  = processor.getLogicalProcessorCount();
             physicalCores = processor.getPhysicalProcessorCount();
-            osName = si.getOperatingSystem().toString();
+            osName = os.toString();
 
             // 초기값 수집 (첫 번째 tick은 기준값 역할만 함)
             totalMem = memory.getTotal();
@@ -83,15 +92,34 @@ public class SystemMonitorService {
     private void collect() {
         try {
             // CPU: 이전 틱과 현재 틱 차이로 사용률 계산
-            cpuLoad  = processor.getSystemCpuLoadBetweenTicks(prevTicks);
+            cpuLoad   = processor.getSystemCpuLoadBetweenTicks(prevTicks);
             prevTicks = processor.getSystemCpuLoadTicks();
 
             // 메모리
             totalMem = memory.getTotal();
             usedMem  = totalMem - memory.getAvailable();
+
+            // 관리 서비스 RSS 합산
+            long[] pids = trackedPids;
+            long rss = 0;
+            for (long pid : pids) {
+                var proc = os.getProcess((int) pid);
+                if (proc != null) rss += proc.getResidentSetSize();
+            }
+            managedRss = rss;
         } catch (Exception e) {
             log.debug("[Monitor] 수집 오류: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 관리 서비스의 PID 목록을 갱신한다.
+     * RUNNING 상태 서비스가 시작·종료될 때 컨트롤러에서 호출한다.
+     *
+     * @param pids 현재 실행 중인 서비스 PID 배열
+     */
+    public void setTrackedPids(long[] pids) {
+        this.trackedPids = pids != null ? pids : new long[0];
     }
 
     /** 스케줄러를 종료한다. AppContext.shutdown() 에서 호출한다. */
@@ -113,6 +141,8 @@ public class SystemMonitorService {
     public int    getPhysicalCores(){ return physicalCores; }
     /** OS 이름 문자열 */
     public String getOsName()       { return osName; }
+    /** 관리 중인 서비스 프로세스의 RSS 합계 (bytes) */
+    public long   getManagedRss()   { return managedRss; }
 
     /** bytes → 사람이 읽기 쉬운 단위 문자열 변환 */
     public static String formatBytes(long bytes) {

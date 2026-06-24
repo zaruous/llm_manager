@@ -4,9 +4,9 @@
  */
 package org.kyj.llmmanager;
 
+import org.kyj.llmmanager.model.ServiceDefinition;
+import org.kyj.llmmanager.model.ServiceInstance;
 import org.kyj.llmmanager.service.*;
-import org.kyj.llmmanager.service.AppSettingsRepository;
-import org.kyj.llmmanager.service.DevHotReloader;
 
 /**
  * 앱 전역 싱글톤 컨텍스트. 모든 서비스 객체를 생성·보관하며 UI 레이어에 제공한다.
@@ -47,6 +47,8 @@ public class AppContext {
     private PluginCommandExecutor pluginCommandExecutor;
     /** 플러그인 런타임 의존성 설치 서비스. */
     private PluginDependencyInstaller pluginDependencyInstaller;
+    /** 위키 페이지 벡터 색인 서비스 (임베딩 + sqlite-vec). */
+    private WikiIndexService wikiIndexService;
 
     private AppContext() {}
 
@@ -62,6 +64,9 @@ public class AppContext {
         appSettingsRepository.load();
         pluginManager = new PluginManager();
         pluginManager.load();
+        // groovyScript 바인딩 'pluginsDir'에서 플러그인 디렉토리를 참조할 수 있도록 시스템 프로퍼티 설정
+        System.setProperty("llm.pluginsDir",
+                pluginManager.getPluginDir().toAbsolutePath().toString());
         pluginCommandExecutor = new PluginCommandExecutor(pluginManager, appSettingsRepository);
         pluginDependencyInstaller = new PluginDependencyInstaller();
         devHotReloader    = new DevHotReloader();
@@ -69,11 +74,12 @@ public class AppContext {
         serviceRegistry = new ServiceRegistry();
         serviceRegistry.load();
         logService = new LogService();
-        processManager = new ProcessManager(logService);
+        processManager = new ProcessManager(logService, appSettingsRepository);
         installationService = new InstallationService();
         healthMonitor = new HealthMonitor(processManager,
                 appSettingsRepository.get().getHealthCheckInterval());
         healthMonitor.start();
+        startAutoStartServices();
 
         llmSkillInstaller = new LlmSkillInstaller(
                 new LlmSkillLibraryRepository(appSettingsRepository.get()));
@@ -96,6 +102,8 @@ public class AppContext {
         if (settings.isApiServerEnabled()) {
             apiServer.start(settings.getApiServerHost(), settings.getApiServerPort());
         }
+
+        wikiIndexService = new WikiIndexService(appSettingsRepository);
 
         // JVM 강제 종료(Ctrl+C, SIGTERM) 시 실행 중인 서비스 프로세스를 정리한다.
         // 작업 관리자에서 kill -9 수준의 강제 종료는 훅이 실행되지 않는다.
@@ -123,6 +131,23 @@ public class AppContext {
         if (llmSkillInstaller != null) llmSkillInstaller.shutdown();
         if (systemMonitor != null) systemMonitor.stop();
         if (trayManager != null)   trayManager.remove();
+        if (wikiIndexService != null) wikiIndexService.close();
+    }
+
+    /**
+     * 서비스별 자동 시작 옵션이 켜진 항목을 앱 시작 시 기동한다.
+     * 이미 PID 파일로 살아 있는 프로세스가 감지되면 새로 띄우지 않고 기존 프로세스에 연결한다.
+     */
+    private void startAutoStartServices() {
+        for (ServiceDefinition def : serviceRegistry.getAll()) {
+            if (!def.isAutoStart()) continue;
+            ServiceInstance inst = processManager.getOrCreate(def);
+            if (!installationService.isInstalled(def)) {
+                logService.addSystemLog(inst, "자동 시작 건너뜀: 설치되지 않은 서비스입니다.");
+                continue;
+            }
+            processManager.start(inst);
+        }
     }
 
     public AppSettingsRepository getAppSettingsRepository() { return appSettingsRepository; }
@@ -141,4 +166,5 @@ public class AppContext {
     public PluginManager getPluginManager() { return pluginManager; }
     public PluginCommandExecutor getPluginCommandExecutor() { return pluginCommandExecutor; }
     public PluginDependencyInstaller getPluginDependencyInstaller() { return pluginDependencyInstaller; }
+    public WikiIndexService getWikiIndexService() { return wikiIndexService; }
 }

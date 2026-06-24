@@ -46,6 +46,8 @@ public class AddServiceController {
     @FXML private TextArea installCommandsArea;
     /** 서비스 포트 입력 필드 */
     @FXML private TextField portField;
+    /** LLM Manager 시작 시 서비스 자동 실행 여부 */
+    @FXML private CheckBox autoStartCheck;
     /** 사전 정의된 서비스 템플릿 선택 콤보박스 */
     @FXML private ComboBox<String> templateCombo;
     /** 서비스 정의를 동적으로 수정할 Groovy 스크립트 입력 영역 */
@@ -137,6 +139,7 @@ public class AddServiceController {
 
         if (def.getPort() != null) portField.setText(String.valueOf(def.getPort()));
         else portField.clear();
+        autoStartCheck.setSelected(def.isAutoStart());
 
         if (def.getInstallCommands() != null && !def.getInstallCommands().isEmpty()) {
             installCommandsArea.setText(String.join("\n", def.getInstallCommands()));
@@ -196,7 +199,10 @@ public class AddServiceController {
             argEnabledChecks.put(spec.getName(), enabledCb);
 
             // 플래그 레이블
-            Label flagLbl = new Label(spec.getFlag());
+            String keyText = (spec.getFlag() != null && !spec.getFlag().isBlank())
+                    ? spec.getFlag()
+                    : spec.getName();
+            Label flagLbl = new Label(keyText);
             flagLbl.getStyleClass().add("arg-flag");
             flagLbl.setWrapText(false);
 
@@ -429,6 +435,7 @@ public class AddServiceController {
         def.setRuntimeType(runtimeCombo.getValue());
         def.setStartCommand(startCommandArea.getText().trim());
         def.setWorkingDir(installDirField.getText().trim());
+        def.setAutoStart(autoStartCheck.isSelected());
 
         List<String> installCmds = new ArrayList<>();
         for (String line : installCommandsArea.getText().split("\n")) {
@@ -466,10 +473,6 @@ public class AddServiceController {
             }
             def.setArgSpecs(updatedSpecs);
             def.setArgValues(argValues);
-
-        } else if ("BGE-M3 Embedding Server".equals(templateCombo.getValue())) {
-            // 기존 하드코딩 템플릿 fallback (builtin 선택이 아닌 경우)
-            def.setArgSpecs(createBgeM3Args());
         }
 
         return def;
@@ -486,53 +489,6 @@ public class AddServiceController {
         dst.setOptions(src.getOptions() != null ? new ArrayList<>(src.getOptions()) : null);
         dst.setEnabled(src.isEnabled());
         return dst;
-    }
-
-    private List<ArgSpec> createBgeM3Args() {
-        List<ArgSpec> specs = new ArrayList<>();
-
-        ArgSpec port = new ArgSpec();
-        port.setName("port");
-        port.setFlag("--port");
-        port.setType("INTEGER");
-        port.setDefaultValue("3000");
-        port.setDescription("서버 포트");
-        specs.add(port);
-
-        ArgSpec device = new ArgSpec();
-        device.setName("device");
-        device.setFlag("--device");
-        device.setType("SELECT");
-        device.setOptions(Arrays.asList("auto", "cpu", "cuda", "mps"));
-        device.setDefaultValue("auto");
-        device.setDescription("연산 장치");
-        specs.add(device);
-
-        ArgSpec fp16 = new ArgSpec();
-        fp16.setName("fp16");
-        fp16.setFlag("--fp16");
-        fp16.setType("BOOLEAN");
-        fp16.setDefaultValue("false");
-        fp16.setDescription("FP16 모드 (CUDA 권장)");
-        specs.add(fp16);
-
-        ArgSpec batchSize = new ArgSpec();
-        batchSize.setName("batch-size");
-        batchSize.setFlag("--batch-size");
-        batchSize.setType("INTEGER");
-        batchSize.setDefaultValue("32");
-        batchSize.setDescription("배치 크기");
-        specs.add(batchSize);
-
-        ArgSpec model = new ArgSpec();
-        model.setName("model");
-        model.setFlag("--model");
-        model.setType("STRING");
-        model.setDefaultValue("BAAI/bge-m3");
-        model.setDescription("모델 이름");
-        specs.add(model);
-
-        return specs;
     }
 
     /**

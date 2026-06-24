@@ -32,6 +32,7 @@ public class CommandBuilder {
 
         for (ArgSpec spec : def.getArgSpecs()) {
             if (!spec.isEnabled()) continue;
+            if (spec.getFlag() == null || spec.getFlag().isBlank()) continue;
             String value = argValues.getOrDefault(spec.getName(), spec.getDefaultValue());
             if (value == null || value.isBlank()) continue;
 

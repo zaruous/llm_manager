@@ -136,8 +136,8 @@
                                                style="-fx-font-family:monospace; -fx-font-size:11px;"
                                                GridPane.columnIndex="2" GridPane.rowIndex="1"/>
 
-                                        <!-- JVM 힙 -->
-                                        <Label text="JVM 힙"
+                                        <!-- 관리 메모리 -->
+                                        <Label text="관리 메모리"
                                                style="-fx-text-fill:#888888; -fx-font-size:11px;"
                                                GridPane.columnIndex="0" GridPane.rowIndex="2"/>
                                         <ProgressBar fx:id="jvmBar" maxWidth="Infinity"
@@ -218,6 +218,10 @@
                             <Tab text="설정">
                                 <ScrollPane fitToWidth="true">
                                     <VBox spacing="12" style="-fx-padding: 16;">
+                                        <Label text="시작 옵션"   style="-fx-font-weight:bold; -fx-font-size:14px;"/>
+                                        <CheckBox fx:id="autoStartCheck"
+                                                  text="LLM Manager 시작 시 이 서비스 자동 실행"/>
+                                        <Separator/>
                                         <Label text="실행 인수"   style="-fx-font-weight:bold; -fx-font-size:14px;"/>
                                         <VBox fx:id="argsContainer" spacing="4"/>
                                         <Separator/>

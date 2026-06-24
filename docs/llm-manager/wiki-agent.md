@@ -57,6 +57,54 @@
 | 그래프 빌드 (Graph) | 발생 |
 | 그래프 열기 / 위키 브라우저 | 없음 |
 
+## Wiki MCP 서비스 도구
+
+`wiki-mcp` 서비스를 설치·시작하면 외부 MCP 클라이언트에서 다음 도구를 사용할 수 있다.
+조회/검사 도구는 기본적으로 LLM/API를 호출하지 않는다.
+
+| 도구 | 용도 |
+|------|------|
+| `wiki_search` | 벡터 색인 검색, 색인/임베딩 실패 시 키워드 검색 폴백 |
+| `wiki_get_page` | 위키 페이지 원문 조회 |
+| `wiki_overview` | overview.md, index.md, 페이지 통계 조회 |
+| `wiki_query` | 관련 청크를 질문 컨텍스트로 반환 |
+| `wiki_list_contradictions` | Contradictions 섹션이 있는 페이지 목록 |
+| `wiki_health` | 빈/스텁 파일, index.md 동기화, log.md ingest 누락 점검 |
+| `wiki_lint` | 고아 페이지, 깨진 위키링크, 누락 엔티티 후보, sparse 페이지, graph.json 품질 점검 |
+| `wiki_ingest` | `--enable-write` 활성화 시 content/file_path를 raw에 불변 저장하고 Cursor Agent로 위키 갱신 |
+
+`wiki_ingest`는 기본 비활성이다. 서비스 설정에서 `enable-write`를 켜고
+`CURSOR_API_KEY` 환경변수를 설정해야 한다. 입력은 서버의 `--workspace`로 지정된
+워크스페이스에만 저장되며, 원본은 `raw/mcp-ingest/<날짜>/`에 보존된다.
+파일 입력은 Wiki Agent 플러그인의 `ingest.include`/`ingest.exclude` 규칙을
+따르며, content 크기 제한과 원본 저장 위치도 각각 `ingest.contentMaxBytes`,
+`ingest.stagingDirectory`에서 가져온다. 서버 내부에 별도 ingest 기본값을 두지
+않으며, 설정 파일이 없거나 형식이 잘못된 경우 수집을 중단하고 설정 오류를 반환한다.
+Cursor 모델과 제한 시간은 별도 값을 지정하지 않으면 각각 Cursor Agent
+Runner의 기본 모델과 Wiki Agent의 `timeoutMinutes` 설정을 사용한다.
+Cursor SDK는 기존 글로벌 설치를 사용하며 서비스 설치 과정에서 재설치하지 않는다.
+
+### 크기 제한이 적용되는 위치
+
+`ingest.contentMaxBytes`의 기본값은 `10485760`(10 MiB)이며 MCP 호출자가
+`wiki_ingest(content=...)`로 원문을 JSON 요청에 직접 포함할 때만 적용된다.
+UTF-8 인코딩 후 바이트 수를 검사해 과도한 요청 본문·메모리 사용을 막는 수신 단계
+안전장치다. `file_path` 입력, raw 원본 파일 전체 크기, Cursor의 문서 요약,
+Wiki 임베딩 청크 크기에는 적용되지 않는다.
+
+Cursor 수집과 임베딩은 별도 기준을 사용한다.
+
+| 단계 | 현재 기준 | 목적 |
+|------|----------|------|
+| MCP `content` 직접 입력 | 10 MiB | 과도한 MCP/JSON 요청 차단 |
+| 작은 파일 Cursor 수집 | 최대 5개, 합계 512 KiB | 한 번의 에이전트 작업량 제한 |
+| 큰 텍스트 Cursor 수집 | 200 KiB 초과 시 40,000자 목표, 60,000자 상한 섹션 | 섹션별 노트 후 최종 병합 |
+| 큰 PDF Cursor 수집 | 4 MiB 초과 시 5페이지 단위 | 이미지·추출 텍스트 판독 후 병합 |
+| Wiki 임베딩 | 목표 1,500자, 최대 2,500자, 중첩 200자 | 검색용 의미 청크 생성 |
+
+현재 원본 파일 전체에 대한 절대 거부 상한은 없다. 큰 텍스트와 PDF는 분할 처리하며,
+기타 대형 바이너리는 Cursor에 변환→노트→병합 단계를 지시한다.
+
 ## 설정 (설정 > Wiki Agent / Cursor)
 
 | 항목 | 설명 |
@@ -66,6 +114,34 @@
 | 실행 타임아웃 (분) | 비우면 무제한(기본). 초과 시 자식 프로세스까지 강제 종료 |
 | Default Model (Cursor 탭) | 위임 실행에 사용할 Cursor 모델 |
 | 응답 언어 (Cursor 탭) | 한국어(기본)/English — 사고 과정 포함 출력 언어 지시문 주입 |
+| 목표/최대/중첩 청크 문자 수 | Wiki Markdown을 임베딩 직전에 나누는 기준 |
+| 선택 디렉토리 색인 상태 확인 | 현재 전처리 청크 해시와 SQLite 해시를 비교해 최신·변경됨·미색인·빈 문서·잔여 색인을 파일별 표시 |
+
+색인 상태 조회는 임베딩 서버를 호출하지 않는다. `현재 청크`는 현재 설정으로 다시
+전처리했을 때 생성되는 청크 수이고, `색인 청크`는 SQLite에 저장된 수다.
+두 청크 해시 맵이 완전히 같을 때만 `최신`으로 표시한다. Wiki 파일이 변경되었거나
+청킹 설정을 바꾸면 `변경됨`, 아직 DB에 없으면 `미색인`, 삭제된 파일의 DB 청크가
+남아 있으면 `잔여 색인`으로 표시한다.
+
+## LLM 대화 수집 스킬
+
+Wiki Agent 스킬 팩에는 `wiki-ingest-conversation`이 포함된다.
+
+- Codex: `.agents/skills/wiki-ingest-conversation/`
+- Cursor: `.cursor/skills/wiki-ingest-conversation/`
+- Claude Code: `.claude/skills/wiki-ingest-conversation/`
+
+사용자가 “현재 대화를 Wiki에 수집해”, “이 설계 논의를 지식으로 저장해”처럼
+명시적으로 요청했을 때만 실행한다. 스킬은 현재 대화에서 사용자·assistant의 관련
+메시지만 선별하고 시스템 지시, 내부 추론, 불필요한 도구 출력과 비밀값을 제거한
+Markdown을 만든다. 이후 `wiki-mcp`의 `wiki_ingest(content=...)`를 한 번 호출해
+`raw/mcp-ingest/`에 원본을 보존하고 Cursor의 기존 Wiki ingest 워크플로우를 실행한다.
+
+Codex용 `agents/openai.yaml`은 `allow_implicit_invocation: false`로 설정되어 있어
+일반 대화를 자동 수집하지 않는다. `$wiki-ingest-conversation`으로 명시 호출하거나
+대화 저장 의도가 분명한 요청에서 사용한다. MCP 서비스는 `enable-write=true`와
+`CURSOR_API_KEY`가 필요하다. MCP 응답이 색인 성공을 명시하지 않으면 벡터 색인은
+별도 단계로 취급한다.
 
 ## 구현 메모 (유지보수용)
 

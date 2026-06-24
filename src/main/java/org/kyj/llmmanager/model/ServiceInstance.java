@@ -81,6 +81,18 @@ public class ServiceInstance {
 
     public long getPid() { return pid; }
 
+    /**
+     * PID 파일로 발견한 외부/고아 프로세스를 표시한다.
+     * Process 객체는 없지만 stop()은 PID 파일을 통해 종료할 수 있다.
+     *
+     * @param pid 감지한 OS 프로세스 ID
+     */
+    public void attachExternalPid(long pid) {
+        this.process = null;
+        this.pid = pid;
+        this.startTime = Instant.now();
+    }
+
     public Instant getStartTime() { return startTime; }
     public void setStartTime(Instant startTime) { this.startTime = startTime; }
 

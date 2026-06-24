@@ -48,6 +48,26 @@ class CommandBuilderTest {
                 "--port=9090"), CommandBuilder.splitCommand(command));
     }
 
+    @Test
+    void buildStartCommandSkipsBlankFlagSpecs() {
+        ServiceDefinition def = new ServiceDefinition();
+        def.setStartCommand("java -jar app.jar");
+        def.setArgSpecs(List.of(
+                spec("runtime.home", "", "STRING", "E:\\mes\\runtime"),
+                spec("port", "--server.port=", "INTEGER", "20301")));
+        def.setArgValues(Map.of(
+                "runtime.home", "D:\\runtime",
+                "port", "20302"));
+
+        String command = CommandBuilder.buildStartCommand(def);
+
+        assertEquals(List.of(
+                "java",
+                "-jar",
+                "app.jar",
+                "--server.port=20302"), CommandBuilder.splitCommand(command));
+    }
+
     private ArgSpec spec(String name, String flag, String type, String defaultValue) {
         ArgSpec spec = new ArgSpec();
         spec.setName(name);

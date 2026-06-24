@@ -8,20 +8,20 @@ echo ============================================
 echo   LLM Manager - Startup
 echo ============================================
 echo.
-echo [사용법] start.bat [옵션...]
-echo   --api.server.enabled=true     내장 API 서버 활성화
-echo   --api.server.port=8185        API 서버 포트 (기본: 8185)
-echo   --runtime.python=python3      Python 실행 명령어
-echo   --runtime.java=java           Java 실행 명령어
-echo   --install.base=D:\llm-svcs   서비스 기본 설치 경로
+echo [Usage] start.bat [options...]
+echo   --api.server.enabled=true     Enable built-in API server
+echo   --api.server.port=8185        API server port (default: 8185)
+echo   --runtime.python=python3      Python executable command
+echo   --runtime.java=java           Java executable command
+echo   --install.base=D:\llm-svcs   Base installation path for services
 echo.
-echo [설정 우선순위] CLI 인수 > settings.json > application.yml
+echo [Config priority] CLI args ^> settings.json ^> application.yml
 echo.
 
-rem -- Java check --
+rem -- Check Java installation --
 where java > nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Java not found. Please install Java 17+ and add to PATH.
+    echo [ERROR] Java not found. Please install Java 17+ and add it to PATH.
     pause
     exit /b 1
 )

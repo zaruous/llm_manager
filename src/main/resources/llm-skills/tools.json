@@ -94,6 +94,8 @@
             "targetPath": ".claude/commands/wiki-lint.md", "template": false },
           { "resourcePath": "llm-skills/wiki-agent/commands/wiki-graph.md",
             "targetPath": ".claude/commands/wiki-graph.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/skills/wiki-ingest-conversation/SKILL.md",
+            "targetPath": ".claude/skills/wiki-ingest-conversation/SKILL.md", "template": false },
           { "resourcePath": "llm-skills/wiki-agent/CLAUDE.md",
             "targetPath": "CLAUDE.md", "template": false }
         ]
@@ -109,11 +111,26 @@
       },
       {
         "id": "wiki-codex",
-        "name": "Codex/OpenCode 스키마 (AGENTS.md)",
+        "name": "Codex/OpenCode 스키마 (AGENTS.md + 대화 수집 스킬)",
         "tags": ["wiki", "codex"],
         "files": [
           { "resourcePath": "llm-skills/wiki-agent/AGENTS.md",
-            "targetPath": "AGENTS.md", "template": false }
+            "targetPath": "AGENTS.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/skills/wiki-ingest-conversation/SKILL.md",
+            "targetPath": ".agents/skills/wiki-ingest-conversation/SKILL.md", "template": false },
+          { "resourcePath": "llm-skills/wiki-agent/skills/wiki-ingest-conversation/agents/openai.yaml",
+            "targetPath": ".agents/skills/wiki-ingest-conversation/agents/openai.yaml",
+            "template": false }
+        ]
+      },
+      {
+        "id": "wiki-cursor",
+        "name": "Cursor 대화 수집 스킬",
+        "tags": ["wiki", "cursor"],
+        "files": [
+          { "resourcePath": "llm-skills/wiki-agent/skills/wiki-ingest-conversation/SKILL.md",
+            "targetPath": ".cursor/skills/wiki-ingest-conversation/SKILL.md",
+            "template": false }
         ]
       }
     ]

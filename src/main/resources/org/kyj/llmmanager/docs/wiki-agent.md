@@ -15,6 +15,7 @@
 - `CURSOR_API_KEY` 시스템 환경변수
 - `cursor-agent-runner` 플러그인
 - Node.js 22 이상과 글로벌 `@cursor/sdk`
+- 대화 수집 시 `Wiki MCP Server` (`enable-write=true`)
 
 Claude Code에서 직접 사용할 때는 `LLM Wiki Agent > 위키 Claude Code 스킬` 팩을
 설치한 뒤 위키 워크스페이스에서 `claude`를 실행합니다.
@@ -82,6 +83,40 @@ A 방식은 스킬 팩 설치 후 Claude Code에서 `/wiki-ingest`, `/wiki-query
 모델·응답 언어는 `설정 > Cursor` 탭의 Default Model / 응답 언어 설정을 따릅니다.
 한국어가 기본이며, Cursor Agent의 사고 과정과 응답에도 같은 언어 지시가 적용됩니다.
 
+### 임베딩 및 색인 상태
+
+- 목표 청크 문자 수: 기본 1,500자
+- 최대 청크 문자 수: 기본 2,500자
+- 청크 중첩 문자 수: 기본 200자
+- `선택 디렉토리 색인 상태 확인`: 파일별 최신·변경됨·미색인·빈 문서·잔여 색인 표시
+
+상태 조회는 임베딩 서버를 호출하지 않고 현재 전처리 청크 해시와 SQLite 해시를
+비교합니다. `변경됨` 또는 `미색인`이면 플러그인 메뉴의 벡터 색인 갱신을 실행합니다.
+
+## LLM 대화 수집
+
+현재 대화를 수집하려면 `LLM 스킬 설치` 화면에서 사용하는 클라이언트의
+`wiki-ingest-conversation` 스킬을 설치하고 Wiki MCP Server를 연결합니다.
+
+1. Wiki MCP Server의 `workspace`를 Wiki 루트로 지정
+2. `enable-write=true` 설정
+3. Wiki MCP Server 시작
+4. MCP 클라이언트에 `http://localhost:18090/mcp` 등록
+5. 대화에서 명시적으로 수집 요청
+
+Codex 사용 예:
+
+```text
+$wiki-ingest-conversation 현재 대화를 Wiki에 수집해
+```
+
+스킬은 관련 user/assistant 대화만 선별하고 시스템 지시, 내부 추론, 불필요한
+도구 출력과 비밀값을 제외합니다. 대화 원본은 `raw/mcp-ingest/<날짜>/`에 보존되고
+Cursor Agent가 `wiki/` 페이지를 생성·갱신합니다.
+
+자세한 설치 경로, MCP 연결, 상태 확인 방법은 도움말의 `Wiki 대화 수집` 주제를
+참조하세요.
+
 ## 실행 제어
 
 - 수집·질의 다이얼로그의 **중지** 버튼으로 실행 중인 작업을 즉시 종료할 수 있습니다
@@ -101,3 +136,6 @@ A 방식은 스킬 팩 설치 후 Claude Code에서 `/wiki-ingest`, `/wiki-query
 | 큰 PDF가 페이지 분할되지 않음 | `pip install pymupdf` 실행 (페이지 전처리 도구 요구사항). 미설치 시 에이전트 단계 처리로 폴백되며 수집 자체는 동작합니다 |
 | 동일 이름 파일을 다시 수집함 | raw는 불변 저장소 — 내용이 같으면 기존 파일을 재사용하고, 다르면 `이름-1.확장자`로 새로 저장합니다 |
 | 워크스페이스 `tools/`가 덮어써짐 | 정상 동작 — 플러그인이 매 실행마다 최신 도구를 동기화합니다 (그래프 빌드 시 에이전트가 활용) |
+| 대화 수집 스킬이 보이지 않음 | 스킬 팩 설치 경로를 확인하고 Codex/Cursor/Claude 세션을 다시 시작합니다 |
+| `wiki_ingest` 도구가 없음 | Wiki MCP Server에서 `enable-write=true`로 저장한 뒤 서비스를 재시작합니다 |
+| 대화는 수집됐지만 시맨틱 검색되지 않음 | 대화 수집과 임베딩은 별도 단계입니다. 벡터 색인 갱신 후 설정의 색인 상태를 확인합니다 |

@@ -23,11 +23,9 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 
-import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,22 +67,11 @@ public class WikiQueryDialog {
         var ctx = AppContext.getInstance();
         var settings = ctx.getAppSettingsRepository().get();
 
-        TextField workspaceField = new TextField(
-                settings.getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", ""));
-        workspaceField.setPromptText("위키 워크스페이스 디렉토리");
-        Button browseBtn = new Button("찾기");
-        browseBtn.setOnAction(e -> {
-            DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle("위키 워크스페이스 선택");
-            String current = workspaceField.getText().trim();
-            if (!current.isBlank()) {
-                File dir = new File(current);
-                if (dir.isDirectory()) chooser.setInitialDirectory(dir);
-            }
-            File selected = chooser.showDialog(stage);
-            if (selected != null) workspaceField.setText(selected.getAbsolutePath());
-        });
-        HBox workspaceRow = new HBox(8, new Label("워크스페이스:"), workspaceField, browseBtn);
+        String defaultCwd = settings.getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
+        TextField workspaceField = new TextField(defaultCwd);
+        workspaceField.setEditable(false);
+        workspaceField.setPromptText("설정 > wiki-agent > 기본 워크스페이스에서 지정");
+        HBox workspaceRow = new HBox(8, new Label("워크스페이스:"), workspaceField);
         workspaceRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(workspaceField, Priority.ALWAYS);
 
@@ -112,10 +99,33 @@ public class WikiQueryDialog {
                 historyArea.setText(renderHistory(loadHistory(value))));
         historyArea.setText(renderHistory(loadHistory(workspaceField.getText())));
 
+        Stage[] stageRef = {stage};
         Runnable submit = () -> {
             String question = inputField.getText().trim();
             String workspace = workspaceField.getText().trim();
             if (question.isBlank() || workspace.isBlank()) return;
+
+            Path wsPath = Path.of(workspace).toAbsolutePath().normalize();
+            if (!org.kyj.llmmanager.service.WikiWorkspaceInitializer.isInitialized(wsPath)) {
+                javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
+                        javafx.scene.control.Alert.AlertType.CONFIRMATION);
+                alert.initOwner(stageRef[0]);
+                alert.setTitle("위키 골격 초기화");
+                alert.setHeaderText("이 디렉토리에 위키 골격(wiki/index.md)이 없습니다.");
+                alert.setContentText("raw/, wiki/, graph/ 골격을 지금 생성할까요?\n" + wsPath);
+                var answer = alert.showAndWait();
+                if (answer.isEmpty() || answer.get() != javafx.scene.control.ButtonType.OK) {
+                    appendLine(historyArea, "[취소] 위키 골격이 필요합니다.");
+                    return;
+                }
+                try {
+                    org.kyj.llmmanager.service.WikiWorkspaceInitializer.initialize(wsPath);
+                    appendLine(historyArea, "위키 골격을 초기화했습니다: " + wsPath);
+                } catch (Exception ex) {
+                    appendLine(historyArea, "[오류] 골격 초기화 실패: " + ex.getMessage());
+                    return;
+                }
+            }
 
             org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
                     ctx.getAppSettingsRepository(), workspace);

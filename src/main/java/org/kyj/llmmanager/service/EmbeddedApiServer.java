@@ -261,6 +261,7 @@ public class EmbeddedApiServer {
         node.put("workingDir",      nvl(def.getWorkingDir()));
         node.put("repoUrl",         nvl(def.getRepoUrl()));
         node.put("healthCheckPath", nvl(def.getHealthCheckPath()));
+        node.put("autoStart",       def.isAutoStart());
         node.put("builtin",         def.isBuiltin());
 
         // 실행 인수
@@ -550,6 +551,7 @@ public class EmbeddedApiServer {
         svcProps.putObject("startCommand")  .put("type", "string");
         svcProps.putObject("installDir")    .put("type", "string");
         svcProps.putObject("healthCheckPath").put("type", "string");
+        svcProps.putObject("autoStart")     .put("type", "boolean");
         svcProps.putObject("builtin")       .put("type", "boolean");
     }
 }

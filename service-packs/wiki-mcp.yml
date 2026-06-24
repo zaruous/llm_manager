@@ -1,0 +1,121 @@
+name: Wiki MCP Server
+id: wiki-mcp
+description: "위키 워크스페이스를 MCP 도구로 노출하는 서버 (시맨틱 검색·페이지 조회·질의)"
+runtimeType: PYTHON
+startCommand: "python server.py"
+port: 18090
+healthCheckPath: /health
+installCommands:
+  - "pip install fastmcp>=2.0.0"
+
+argSpecs:
+  - name: port
+    flag: --port
+    label: MCP 서버 포트
+    type: NUMBER
+    defaultValue: "18090"
+  - name: embedding-url
+    flag: --embedding-url
+    label: BGE-M3 임베딩 서버 URL
+    type: STRING
+    defaultValue: "http://localhost:18080"
+    description: "bgem3-embedding 서비스 주소 (벡터 검색 사용 시 필요)"
+  - name: enable-write
+    flag: --enable-write
+    label: 쓰기 도구(wiki_ingest) 허용
+    type: BOOLEAN
+    defaultValue: "false"
+    description: "외부 에이전트가 입력한 내용을 Cursor Agent로 위키에 수집하도록 허용 (기본 비활성)"
+  - name: cursor-model
+    flag: --cursor-model
+    label: Ingest Cursor 모델
+    type: STRING
+    defaultValue: ""
+    description: "비우면 Cursor Agent Runner 플러그인의 기본 모델 설정을 사용"
+  - name: cursor-timeout
+    flag: --cursor-timeout
+    label: Ingest 제한 시간(초)
+    type: NUMBER
+    defaultValue: "-1"
+    description: "-1이면 Wiki Agent 플러그인의 timeoutMinutes 설정, 0이면 무제한"
+  - name: workspace
+    flag: --workspace
+    label: 위키 워크스페이스 경로
+    type: DIRECTORY
+    required: true
+    description: "wiki/index.md가 있는 루트 디렉토리"
+  - name: db-path
+    flag: --db-path
+    label: "벡터 색인 DB 경로"
+    type: STRING
+    defaultValue: "~/llm-services/wiki-mcp-server/wiki-vector.sqlite"
+    description: "워크스페이스 지정 시 {workspace}/.llm-manager/wiki-vector.sqlite로 자동 변경됩니다."
+  - name: vec0-path
+    flag: --vec0-path
+    label: "sqlite-vec 라이브러리 경로"
+    type: STRING
+    defaultValue: "~/llm-services/native/vec0.dll"
+    description: "vec0.dll (Windows) 또는 vec0.so (Linux·Mac). 비워두면 코사인 선형 탐색으로 폴백됩니다."
+
+groovyScript: |
+  // installDir: INSTALL_BASE 환경변수 우선, 없으면 ~/llm-services/wiki-mcp-server (bgem3 방식과 동일)
+  service.installDir = env('INSTALL_BASE') ?: (userHome + '/llm-services/wiki-mcp-server')
+
+  // server.py는 설치 시 plugin 디렉토리에서 installDir로 복사하고, 실행은 installDir 기준으로 한다.
+  // pluginsDir 바인딩은 AppContext.init()이 llm.pluginsDir 시스템 프로퍼티로 설정한 값이다.
+  def pluginDir = new File(pluginsDir, 'wiki-agent')
+  service.workingDir = service.installDir
+
+  // OS에 따른 python 명령어
+  service.startCommand = (os == 'windows') ? 'python server.py' : 'python3 server.py'
+
+  def installDirFile = new File(service.installDir)
+  def serverFile = new File(pluginDir, 'server.py')
+  def pluginConfig = new File(pluginDir, 'plugin.json')
+  def agentsMd = new File(pluginDir, 'AGENTS.md')
+  def toolsDir = new File(pluginDir, 'tools')
+  def cursorSidecar = new File(new File(new File(pluginDir.parentFile, 'cursor-agent-runner'), 'sidecar'), 'cursor-agent-sidecar.js')
+  def installedSidecar = new File(installDirFile, 'cursor-agent-sidecar.js')
+  def installedPluginConfig = new File(installDirFile, 'plugin.json')
+  def installedAgentsMd = new File(installDirFile, 'AGENTS.md')
+  def enableWrite = 'true'.equalsIgnoreCase(service.argValues?.get('enable-write'))
+  if (enableWrite) {
+    service.startCommand = service.startCommand +
+      ' --cursor-sidecar "' + installedSidecar.absolutePath + '"' +
+      ' --plugin-config "' + installedPluginConfig.absolutePath + '"'
+  }
+
+  if (os == 'windows') {
+    def psq = { s -> "'" + s.replace("'", "''") + "'" }
+    def writeFilesCopy = enableWrite
+      ? "; Copy-Item -LiteralPath ${psq(cursorSidecar.absolutePath)} -Destination ${psq(installedSidecar.absolutePath)} -Force; Copy-Item -LiteralPath ${psq(pluginConfig.absolutePath)} -Destination ${psq(installedPluginConfig.absolutePath)} -Force"
+      : ""
+    def copyCommand = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType Directory -Force -Path ${psq(installDirFile.absolutePath)} | Out-Null; Copy-Item -LiteralPath ${psq(serverFile.absolutePath)} -Destination ${psq(new File(installDirFile, 'server.py').absolutePath)} -Force; Copy-Item -LiteralPath ${psq(agentsMd.absolutePath)} -Destination ${psq(installedAgentsMd.absolutePath)} -Force; Copy-Item -LiteralPath ${psq(toolsDir.absolutePath)} -Destination ${psq(installDirFile.absolutePath)} -Recurse -Force${writeFilesCopy}\""
+    service.installCommands = [
+      copyCommand.toString(),
+      "pip install \"fastmcp>=2.0.0\""
+    ]
+  } else {
+    def shQuote = { s -> "'" + s.replace("'", "'\"'\"'") + "'" }
+    def writeFilesCopy = enableWrite
+      ? " && cp -f ${shQuote(cursorSidecar.absolutePath)} ${shQuote(installedSidecar.absolutePath)} && cp -f ${shQuote(pluginConfig.absolutePath)} ${shQuote(installedPluginConfig.absolutePath)}"
+      : ""
+    def copyCommand = "mkdir -p ${shQuote(new File(installDirFile, 'tools').absolutePath)} && cp -f ${shQuote(serverFile.absolutePath)} ${shQuote(new File(installDirFile, 'server.py').absolutePath)} && cp -f ${shQuote(agentsMd.absolutePath)} ${shQuote(installedAgentsMd.absolutePath)} && cp -R ${shQuote(new File(toolsDir, '.').absolutePath)} ${shQuote(new File(installDirFile, 'tools').absolutePath)}${writeFilesCopy}"
+    service.installCommands = [
+      copyCommand.toString(),
+      "pip install 'fastmcp>=2.0.0'"
+    ]
+  }
+
+  // vec0 라이브러리 기본 경로: ~/llm-services/native/vec0.dll(.so)
+  def nativeDir = userHome + '/llm-services/native'
+  def vec0File  = (os == 'windows') ? (nativeDir + '/vec0.dll') : (nativeDir + '/vec0.so')
+  service.argValues['vec0-path'] = vec0File
+
+  // db-path: 워크스페이스가 설정된 경우 워크스페이스 기준, 아니면 installDir 기준 기본값 사용
+  def ws = service.argValues?.get('workspace')
+  if (ws != null && !ws.isBlank()) {
+    service.argValues['db-path'] = new File(new File(ws, '.llm-manager'), 'wiki-vector.sqlite').absolutePath
+  } else {
+    service.argValues['db-path'] = new File(service.installDir, 'wiki-vector.sqlite').absolutePath
+  }

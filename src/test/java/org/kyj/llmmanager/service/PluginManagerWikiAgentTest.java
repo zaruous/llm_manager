@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * wiki-agent 플러그인 manifest가 PluginManager 경로로 정상 로드되는지 검증한다.
- * cursor 전용 축소(v0.2.0) 이후의 manifest 구성을 함께 확인 —
- * 실행 커맨드는 CURSOR_API_KEY를 요구하고, 제거된 wiki.agent 드롭다운은 없어야 한다.
+ * cursor 전용 축소(v0.2.0) 이후의 manifest 구성을 함께 확인한다.
+ * Cursor 위임 실행 커맨드는 CURSOR_API_KEY를 요구하고, 앱 내부 커맨드는 env 요구가 없어야 한다.
  */
 class PluginManagerWikiAgentTest {
 
@@ -51,17 +51,19 @@ class PluginManagerWikiAgentTest {
         assertTrue(keyField.isPresent(), "CURSOR_API_KEY 필드가 있어야 함");
         assertEquals("env", keyField.get().getKind());
 
-        // 커맨드 7종 등록 확인
+        // 커맨드 8종 등록 확인 (wiki.reindex는 앱 내부 Java 경로로 처리)
         var wikiCommands = manager.getCommands().stream()
                 .filter(c -> "wiki-agent".equals(c.pluginId()))
                 .toList();
-        assertEquals(7, wikiCommands.size(), "wiki 커맨드 7종이 등록되어야 함");
+        assertEquals(8, wikiCommands.size(), "wiki 커맨드 8종이 등록되어야 함");
 
-        // 실행형 커맨드(browse·openGraph 제외)는 모두 CURSOR_API_KEY를 요구해야 함
+        // Cursor 위임 실행형 커맨드만 CURSOR_API_KEY를 요구해야 함
         for (var contribution : wikiCommands) {
             var command = contribution.command();
             String id = command.getId();
-            if ("wiki.browse".equals(id) || "wiki.openGraph".equals(id)) {
+            if ("wiki.browse".equals(id)
+                    || "wiki.openGraph".equals(id)
+                    || "wiki.reindex".equals(id)) {
                 assertTrue(command.getRequires().getEnv().isEmpty(),
                         id + "는 env 요구가 없어야 함");
             } else {

@@ -15,7 +15,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.OptionalLong;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -46,6 +45,7 @@ public class HealthMonitor {
         this.processManager  = processManager;
         this.intervalSeconds = Math.max(1, Math.min(10, intervalSeconds));
         this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
         OperatingSystem tmpOs = null;
@@ -78,19 +78,7 @@ public class HealthMonitor {
             ServiceDefinition def = instance.getDefinition();
 
             if (isFirst && instance.getStatus() != ServiceStatus.RUNNING) {
-                // PID 파일 읽기 → 해당 PID의 프로세스가 살아있으면 고아로 간주
-                OptionalLong savedPid = PidFileManager.read(def);
-                if (savedPid.isPresent()) {
-                    long pid = savedPid.getAsLong();
-                    boolean alive = ProcessHandle.of(pid)
-                            .map(ProcessHandle::isAlive).orElse(false);
-                    if (alive) {
-                        Platform.runLater(() -> instance.setStatus(ServiceStatus.RUNNING));
-                    } else {
-                        // 프로세스 이미 죽었으면 PID 파일 정리
-                        PidFileManager.delete(def);
-                    }
-                }
+                processManager.restoreFromPidFile(instance);
                 continue;
             }
 
@@ -106,6 +94,7 @@ public class HealthMonitor {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
                         .uri(URI.create(url))
+                        .version(HttpClient.Version.HTTP_1_1)
                         .timeout(Duration.ofSeconds(2))
                         .GET().build();
                 httpClient.send(req, HttpResponse.BodyHandlers.discarding());
