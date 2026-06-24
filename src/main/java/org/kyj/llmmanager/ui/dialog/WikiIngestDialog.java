@@ -98,12 +98,13 @@ public class WikiIngestDialog {
         stage.setTitle("문서 수집 (Ingest)");
 
         var ctx = AppContext.getInstance();
-        var settings = ctx.getAppSettingsRepository().get();
 
-        String defaultCwd = settings.getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
+        String defaultCwd = resolveWorkspace();
         TextField workspaceField = new TextField(defaultCwd);
         workspaceField.setEditable(false);
-        workspaceField.setPromptText("설정 > wiki-agent > 기본 워크스페이스에서 지정");
+        workspaceField.setPromptText(contribution.linkedServiceId() != null
+                ? "서비스 설정에서 workspace 값을 변경하세요"
+                : "설정 > wiki-agent > 기본 워크스페이스에서 지정");
         HBox workspaceRow = new HBox(8, new Label("워크스페이스:"), workspaceField);
         workspaceRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(workspaceField, Priority.ALWAYS);
@@ -139,7 +140,8 @@ public class WikiIngestDialog {
         HBox selectionButtons = new HBox(8, addFilesBtn, addDirBtn, removeBtn);
 
         // 기본 분류 + 이전 세션에서 저장한 커스텀 분류를 병합해 콤보 초기화
-        String savedCats = settings.getPluginSetting(contribution.pluginId(), "wiki.customCategories", "");
+        String savedCats = ctx.getAppSettingsRepository().get()
+                .getPluginSetting(contribution.pluginId(), "wiki.customCategories", "");
         List<String> allCategories = new ArrayList<>(DEFAULT_CATEGORIES);
         if (!savedCats.isBlank()) {
             for (String c : savedCats.split(",")) {
@@ -213,8 +215,14 @@ public class WikiIngestDialog {
             }
             // 골격 없는 디렉토리는 스킬 설치 화면을 거치지 않고 즉석 초기화 제안
             if (!ensureWorkspaceInitialized(stage, workspace, terminalArea)) return;
-            org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
-                    AppContext.getInstance().getAppSettingsRepository(), workspace);
+            // 서비스 연동 시 전역 설정 대신 서비스 argValues를 갱신
+            if (contribution.linkedServiceId() != null) {
+                org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
+                        ctx.getServiceRegistry(), contribution.linkedServiceId(), workspace);
+            } else {
+                org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
+                        ctx.getAppSettingsRepository(), workspace);
+            }
             stopRequested.set(false);
             enterRunning.run();
 
@@ -547,6 +555,23 @@ public class WikiIngestDialog {
         }
         File selected = chooser.showDialog(stage);
         if (selected != null) target.setText(selected.getAbsolutePath());
+    }
+
+    /**
+     * 워크스페이스 초기값을 결정한다.
+     * linkedServiceId가 있으면 해당 서비스의 argValues["workspace"]를 사용하고,
+     * 없으면 전역 plugin 설정의 wiki.defaultCwd로 폴백한다.
+     */
+    private String resolveWorkspace() {
+        var ctx = AppContext.getInstance();
+        if (contribution.linkedServiceId() != null) {
+            return ctx.getServiceRegistry()
+                    .findById(contribution.linkedServiceId())
+                    .map(def -> def.getArgValues().getOrDefault("workspace", ""))
+                    .orElse("");
+        }
+        return ctx.getAppSettingsRepository()
+                .get().getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
     }
 
     private void appendLine(TextArea area, String line) {

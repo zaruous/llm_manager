@@ -51,6 +51,26 @@ public final class WikiWorkspaceInitializer {
     }
 
     /**
+     * 워크스페이스를 서비스 정의의 argValues["workspace"]에 저장한다.
+     * 서비스 연동 다이얼로그에서 {@link #rememberWorkspace(AppSettingsRepository, String)} 대신 호출한다.
+     *
+     * @param serviceRegistry 서비스 레지스트리
+     * @param serviceId       업데이트할 서비스 UUID
+     * @param workspace       기억할 워크스페이스 경로 (빈 값이면 무시)
+     */
+    public static void rememberWorkspace(ServiceRegistry serviceRegistry,
+                                         String serviceId, String workspace) {
+        if (workspace == null || workspace.isBlank() || serviceId == null) return;
+        serviceRegistry.findById(serviceId).ifPresent(def -> {
+            String current = def.getArgValues().getOrDefault("workspace", "");
+            if (!workspace.equals(current)) {
+                def.getArgValues().put("workspace", workspace);
+                serviceRegistry.update(def);
+            }
+        });
+    }
+
+    /**
      * 위키 골격 파일을 생성한다. 이미 있는 파일은 덮어쓰지 않는다.
      *
      * @param workspace 초기화할 워크스페이스 루트

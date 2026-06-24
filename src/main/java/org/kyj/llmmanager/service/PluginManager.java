@@ -12,6 +12,8 @@ import org.kyj.llmmanager.model.plugin.PluginSettingsTab;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.kyj.llmmanager.model.ServiceDefinition;
+
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -94,20 +96,50 @@ public class PluginManager {
         return result;
     }
 
+    /**
+     * 서비스 레지스트리 없이 커맨드 목록을 반환한다. linkedServiceId는 항상 null.
+     * PluginCommandRunDialog·PluginCommandExecutor처럼 서비스 연동이 불필요한 호출 지점용.
+     */
     public List<PluginCommandContribution> getCommands() {
+        return getCommands(null);
+    }
+
+    /**
+     * 서비스 레지스트리를 참조해 linkedServiceId가 해석된 커맨드 기여 목록을 반환한다.
+     * 플러그인 manifest의 linkedServiceType과 일치하는 packId를 가진 서비스가 정확히 1개일 때
+     * 해당 서비스의 id를 linkedServiceId로 채운다. 0개·2개 이상이면 null을 유지한다.
+     *
+     * @param serviceRegistry 서비스 레지스트리 (null이면 linkedServiceId를 해석하지 않음)
+     * @return 커맨드 기여 목록 (플러그인명·커맨드 제목 순 정렬)
+     */
+    public List<PluginCommandContribution> getCommands(ServiceRegistry serviceRegistry) {
         List<PluginCommandContribution> result = new ArrayList<>();
         for (LoadedPlugin plugin : plugins) {
             if (!plugin.isValid()) continue;
             PluginManifest manifest = plugin.getManifest();
+            String linkedServiceId = resolveLinkedServiceId(manifest, serviceRegistry);
             for (PluginCommand command : manifest.getContributes().getCommands()) {
                 if (command.getId() == null || command.getId().isBlank()) continue;
-                result.add(new PluginCommandContribution(manifest.getId(), manifest.getName(), command));
+                result.add(new PluginCommandContribution(
+                        manifest.getId(), manifest.getName(), command, linkedServiceId));
             }
         }
         result.sort(Comparator
                 .comparing((PluginCommandContribution c) -> c.pluginName())
                 .thenComparing(c -> c.command().getTitle()));
         return result;
+    }
+
+    /**
+     * manifest의 linkedServiceType으로 레지스트리에서 서비스를 탐색해 id를 반환한다.
+     * 등록된 서비스가 정확히 1개인 경우에만 연결한다.
+     */
+    private String resolveLinkedServiceId(PluginManifest manifest, ServiceRegistry serviceRegistry) {
+        if (serviceRegistry == null) return null;
+        String serviceType = manifest.getLinkedServiceType();
+        if (serviceType == null || serviceType.isBlank()) return null;
+        List<ServiceDefinition> found = serviceRegistry.findByPackId(serviceType);
+        return found.size() == 1 ? found.get(0).getId() : null;
     }
 
     public Path getPluginDir() {
@@ -200,6 +232,8 @@ public class PluginManager {
     public record PluginCommandContribution(
             String pluginId,
             String pluginName,
-            PluginCommand command
+            PluginCommand command,
+            /** 연결된 서비스 인스턴스 UUID. 연동 서비스가 없거나 복수이면 null. */
+            String linkedServiceId
     ) {}
 }

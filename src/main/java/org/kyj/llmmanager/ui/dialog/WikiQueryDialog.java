@@ -65,12 +65,13 @@ public class WikiQueryDialog {
         stage.setTitle("위키 질의 (Query)");
 
         var ctx = AppContext.getInstance();
-        var settings = ctx.getAppSettingsRepository().get();
 
-        String defaultCwd = settings.getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
+        String defaultCwd = resolveWorkspace();
         TextField workspaceField = new TextField(defaultCwd);
         workspaceField.setEditable(false);
-        workspaceField.setPromptText("설정 > wiki-agent > 기본 워크스페이스에서 지정");
+        workspaceField.setPromptText(contribution.linkedServiceId() != null
+                ? "서비스 설정에서 workspace 값을 변경하세요"
+                : "설정 > wiki-agent > 기본 워크스페이스에서 지정");
         HBox workspaceRow = new HBox(8, new Label("워크스페이스:"), workspaceField);
         workspaceRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(workspaceField, Priority.ALWAYS);
@@ -127,8 +128,14 @@ public class WikiQueryDialog {
                 }
             }
 
-            org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
-                    ctx.getAppSettingsRepository(), workspace);
+            // 서비스 연동 시 전역 설정 대신 서비스 argValues를 갱신
+            if (contribution.linkedServiceId() != null) {
+                org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
+                        ctx.getServiceRegistry(), contribution.linkedServiceId(), workspace);
+            } else {
+                org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
+                        ctx.getAppSettingsRepository(), workspace);
+            }
             inputField.clear();
             runBtn.setDisable(true);
             stopBtn.setDisable(false);
@@ -223,6 +230,23 @@ public class WikiQueryDialog {
         } catch (Exception ignored) {
             // 이력 저장 실패는 질의 자체의 성패와 무관 — 무시
         }
+    }
+
+    /**
+     * 워크스페이스 초기값을 결정한다.
+     * linkedServiceId가 있으면 해당 서비스의 argValues["workspace"]를 사용하고,
+     * 없으면 전역 plugin 설정의 wiki.defaultCwd로 폴백한다.
+     */
+    private String resolveWorkspace() {
+        var ctx = AppContext.getInstance();
+        if (contribution.linkedServiceId() != null) {
+            return ctx.getServiceRegistry()
+                    .findById(contribution.linkedServiceId())
+                    .map(def -> def.getArgValues().getOrDefault("workspace", ""))
+                    .orElse("");
+        }
+        return ctx.getAppSettingsRepository()
+                .get().getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
     }
 
     private String renderHistory(List<QueryHistoryEntry> entries) {

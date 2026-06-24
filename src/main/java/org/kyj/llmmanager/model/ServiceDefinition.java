@@ -68,6 +68,12 @@ public class ServiceDefinition {
     /** true이면 lib/def/ 에서 로드된 기본 제공 서비스 정의 */
     private boolean builtin = false;
 
+    /**
+     * 이 서비스를 생성한 서비스 팩의 원본 id (예: "wiki-mcp").
+     * 팩에서 등록된 서비스에만 설정되며, 직접 생성한 서비스는 null.
+     */
+    private String packId;
+
     public ServiceDefinition() {
         this.id = UUID.randomUUID().toString();
     }
@@ -108,4 +114,6 @@ public class ServiceDefinition {
     public void setGroovyScript(String groovyScript) { this.groovyScript = groovyScript; }
     public boolean isBuiltin() { return builtin; }
     public void setBuiltin(boolean builtin) { this.builtin = builtin; }
+    public String getPackId() { return packId; }
+    public void setPackId(String packId) { this.packId = packId; }
 }
