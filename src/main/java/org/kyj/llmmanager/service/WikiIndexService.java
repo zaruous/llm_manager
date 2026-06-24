@@ -13,8 +13,10 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
@@ -51,6 +53,44 @@ public class WikiIndexService implements Closeable {
      */
     public record IndexResult(Path workspace, int indexedChunks, int skippedChunks,
                               int deletedPages, int errorPages) {}
+
+    /**
+     * 현재 Wiki 파일과 SQLite 색인의 비교 상태.
+     */
+    public enum PageIndexState {
+        CURRENT,
+        STALE,
+        NOT_INDEXED,
+        EMPTY,
+        ORPHANED
+    }
+
+    /**
+     * 페이지 한 건의 색인 메타데이터.
+     *
+     * @param pagePath      워크스페이스 상대 경로
+     * @param category      Wiki 페이지 카테고리
+     * @param fileBytes     현재 파일 크기, 삭제된 파일은 0
+     * @param expectedChunks 현재 전처리로 생성되는 청크 수
+     * @param indexedChunks SQLite에 저장된 청크 수
+     * @param state         현재 파일과 색인의 비교 상태
+     */
+    public record PageIndexMetadata(String pagePath, String category, long fileBytes,
+                                    int expectedChunks, int indexedChunks,
+                                    PageIndexState state) {}
+
+    /**
+     * 워크스페이스의 색인 상태 요약.
+     *
+     * @param workspace 조회한 워크스페이스
+     * @param pages     파일별 색인 메타데이터
+     */
+    public record WorkspaceIndexMetadata(Path workspace, List<PageIndexMetadata> pages) {
+        /** 지정 상태의 페이지 수를 반환한다. */
+        public long count(PageIndexState state) {
+            return pages.stream().filter(page -> page.state() == state).count();
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────
     // 공개 API
@@ -149,6 +189,55 @@ public class WikiIndexService implements Closeable {
         }
     }
 
+    /**
+     * 임베딩 서버 호출 없이 현재 Wiki 파일과 SQLite 색인 상태를 비교한다.
+     * 현재 전처리 설정으로 다시 계산한 청크 해시가 모두 일치해야 CURRENT로 판정한다.
+     *
+     * @param workspace 위키 워크스페이스 루트
+     * @return 파일별 색인 메타데이터
+     * @throws SQLException SQLite 조회 실패 시
+     */
+    public WorkspaceIndexMetadata inspectWorkspace(Path workspace) throws SQLException {
+        Path normalized = workspace.toAbsolutePath().normalize();
+        WikiVectorRepository repo = getRepo(normalized);
+        List<WikiMarkdownUtils.PageEntry> pages =
+                WikiMarkdownUtils.collectPages(normalized.resolve("wiki"));
+        List<PageIndexMetadata> metadata = new ArrayList<>();
+        Set<String> currentPaths = new java.util.LinkedHashSet<>();
+
+        for (WikiMarkdownUtils.PageEntry page : pages) {
+            String relPath = relativize(normalized, page.file());
+            currentPaths.add(relPath);
+            List<WikiChunker.Chunk> chunks = WikiChunker.chunk(
+                    page.file(), page.category(), relPath, chunkOptions());
+            Map<Integer, String> expected = new LinkedHashMap<>();
+            for (WikiChunker.Chunk chunk : chunks) {
+                expected.put(chunk.chunkNo(), chunk.contentHash());
+            }
+            Map<Integer, String> indexed = repo.getChunkHashes(relPath);
+            PageIndexState state;
+            if (expected.isEmpty()) {
+                state = PageIndexState.EMPTY;
+            } else if (indexed.isEmpty()) {
+                state = PageIndexState.NOT_INDEXED;
+            } else if (expected.equals(indexed)) {
+                state = PageIndexState.CURRENT;
+            } else {
+                state = PageIndexState.STALE;
+            }
+            metadata.add(new PageIndexMetadata(relPath, page.category(),
+                    fileSize(page.file()), expected.size(), indexed.size(), state));
+        }
+
+        for (String indexedPath : repo.getIndexedPagePaths()) {
+            if (!currentPaths.contains(indexedPath)) {
+                metadata.add(new PageIndexMetadata(indexedPath, "deleted",
+                        0, 0, repo.getChunkHashes(indexedPath).size(), PageIndexState.ORPHANED));
+            }
+        }
+        return new WorkspaceIndexMetadata(normalized, List.copyOf(metadata));
+    }
+
     @Override
     public void close() {
         repos.values().forEach(WikiVectorRepository::close);
@@ -169,8 +258,18 @@ public class WikiIndexService implements Closeable {
                             WikiEmbeddingClient client,
                             Consumer<String> progress) throws IOException, SQLException {
 
-        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(page.file(), page.category());
-        if (chunks.isEmpty()) return new int[]{0, 0};
+        WikiPreprocessor.PreparedDocument document = WikiPreprocessor.preprocess(
+                page.file(), page.category(), relPath, chunkOptions());
+        if (!document.warnings().isEmpty()) {
+            String message = String.join(", ", document.warnings());
+            log.debug("wiki-index: 전처리 보정 [{}] — {}", relPath, message);
+            progress.accept("[wiki-index] 전처리 보정: " + relPath + " — " + message);
+        }
+        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(document);
+        if (chunks.isEmpty()) {
+            repo.deleteChunksFrom(relPath, 0);
+            return new int[]{0, 0};
+        }
 
         Map<Integer, String> existingHashes = repo.getChunkHashes(relPath);
 
@@ -186,7 +285,10 @@ public class WikiIndexService implements Closeable {
             }
         }
 
-        if (toEmbed.isEmpty()) return new int[]{0, skipped};
+        if (toEmbed.isEmpty()) {
+            repo.deleteChunksFrom(relPath, chunks.size());
+            return new int[]{0, skipped};
+        }
 
         // 배치 임베딩
         List<String> texts = toEmbed.stream().map(WikiChunker.Chunk::content).toList();
@@ -195,6 +297,7 @@ public class WikiIndexService implements Closeable {
         for (int i = 0; i < toEmbed.size(); i++) {
             repo.upsertChunk(relPath, toEmbed.get(i), embeddings.get(i));
         }
+        repo.deleteChunksFrom(relPath, chunks.size());
 
         progress.accept("[wiki-index] " + relPath + " — " + toEmbed.size() + "청크 색인");
         return new int[]{toEmbed.size(), skipped};
@@ -239,6 +342,31 @@ public class WikiIndexService implements Closeable {
     private String vec0Path() {
         AppSettings settings = settingsRepository.get();
         return settings.getPluginSetting("wiki-agent", "wiki.vec0Path", "");
+    }
+
+    private WikiPreprocessor.Options chunkOptions() {
+        AppSettings settings = settingsRepository.get();
+        return new WikiPreprocessor.Options(
+                intSetting(settings, "wiki.targetChunkChars", 1500),
+                intSetting(settings, "wiki.maxChunkChars", 2500),
+                intSetting(settings, "wiki.chunkOverlapChars", 200));
+    }
+
+    private static int intSetting(AppSettings settings, String key, int fallback) {
+        String value = settings.getPluginSetting("wiki-agent", key, String.valueOf(fallback));
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static long fileSize(Path file) {
+        try {
+            return java.nio.file.Files.size(file);
+        } catch (IOException e) {
+            return 0L;
+        }
     }
 
     private static String relativize(Path workspace, Path file) {

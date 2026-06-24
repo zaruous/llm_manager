@@ -24,7 +24,21 @@ class WikiMcpServicePackTest {
         Path pluginDir = tempDir.resolve("plugins").resolve("wiki-agent");
         Files.createDirectories(pluginDir.resolve("tools"));
         Files.writeString(pluginDir.resolve("server.py"), "print('wiki-mcp')\n");
+        Files.writeString(pluginDir.resolve("plugin.json"), """
+                {
+                  "ingest": {
+                    "include": ["*.md"],
+                    "exclude": ["wiki/**"],
+                    "contentMaxBytes": 10485760,
+                    "stagingDirectory": "raw/mcp-ingest"
+                  }
+                }
+                """);
         Files.writeString(pluginDir.resolve("tools").resolve("tool.py"), "print('tool')\n");
+        Path cursorSidecar = tempDir.resolve("plugins").resolve("cursor-agent-runner")
+                .resolve("sidecar").resolve("cursor-agent-sidecar.js");
+        Files.createDirectories(cursorSidecar.getParent());
+        Files.writeString(cursorSidecar, "console.log('cursor-agent')\n");
 
         Path installBase = tempDir.resolve("install-base");
         Path workspace = tempDir.resolve("workspace");
@@ -38,6 +52,7 @@ class WikiMcpServicePackTest {
             ServiceDefinition def = new ServicePackLoader()
                     .load(Path.of("service-packs", "wiki-mcp.yml").toFile());
             def.getArgValues().put("workspace", workspace.toString());
+            def.getArgValues().put("enable-write", "true");
 
             new ServiceCustomizer().apply(def, def.getGroovyScript());
 
@@ -49,6 +64,14 @@ class WikiMcpServicePackTest {
             assertFalse(def.getInstallCommands().isEmpty());
             assertTrue(def.getInstallCommands().get(0).contains("server.py"));
             assertTrue(def.getInstallCommands().get(0).contains("tools"));
+            assertTrue(def.getInstallCommands().get(0).contains("cursor-agent-sidecar.js"));
+            assertTrue(def.getInstallCommands().get(0).contains("plugin.json"));
+            assertTrue(def.getStartCommand().contains("--cursor-sidecar"));
+            assertTrue(def.getStartCommand().contains("--plugin-config"));
+            assertTrue(def.getStartCommand().contains(
+                    installBase.resolve("cursor-agent-sidecar.js").toString()));
+            assertFalse(def.getInstallCommands().stream()
+                    .anyMatch(command -> command.contains("@cursor/sdk")));
             if (PlatformUtil.isWindows()) {
                 assertTrue(def.getInstallCommands().get(0).contains("Copy-Item"));
             } else {

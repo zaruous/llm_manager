@@ -7,7 +7,7 @@
       "*.md", "*.pdf", "*.docx", "*.pptx", "*.xlsx",
       "*.html", "*.htm", "*.txt", "*.csv", "*.json", "*.xml",
       "*.rst", "*.rtf", "*.epub", "*.ipynb",
-      "*.yaml", "*.yml", "*.tsv", "*.wav", "*.mp3"
+      "*.yaml", "*.yml", "*.tsv", "*.wav", "*.mp3","*.java", "*.js", "*.clx"
     ],
     "exclude": [
       "wiki/**",
@@ -15,7 +15,9 @@
       "tools/**",
       "**/.*",
       "**/.*/**"
-    ]
+    ],
+    "contentMaxBytes": 10485760,
+    "stagingDirectory": "raw/mcp-ingest"
   },
   "type": "local",
   "permissions": [
@@ -148,6 +150,27 @@
                 "kind": "string",
                 "defaultValue": "",
                 "description": "vec0.dll (Windows) 또는 vec0.so (Linux) 절대 경로. 비워두면 코사인 선형 탐색으로 폴백됩니다."
+              },
+              {
+                "key": "wiki.targetChunkChars",
+                "label": "목표 청크 문자 수",
+                "kind": "string",
+                "defaultValue": "1500",
+                "description": "문단·목록·표·코드 블록 경계를 유지하면서 도달할 목표 크기입니다."
+              },
+              {
+                "key": "wiki.maxChunkChars",
+                "label": "최대 청크 문자 수",
+                "kind": "string",
+                "defaultValue": "2500",
+                "description": "일반 텍스트 청크의 최대 크기입니다. 이보다 큰 단일 표·코드 블록은 보존됩니다."
+              },
+              {
+                "key": "wiki.chunkOverlapChars",
+                "label": "청크 중첩 문자 수",
+                "kind": "string",
+                "defaultValue": "200",
+                "description": "인접 청크에 반복할 이전 문맥의 최대 크기입니다."
               }
             ]
           }

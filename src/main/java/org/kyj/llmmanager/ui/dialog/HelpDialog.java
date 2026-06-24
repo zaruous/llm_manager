@@ -42,6 +42,7 @@ public class HelpDialog {
         TOPICS.put("LLM 스킬 설치",             "docs/llm-skills-install.md");
         TOPICS.put("LLM 스킬 로드",             "docs/llm-skills-load.md");
         TOPICS.put("LLM Wiki Agent",           "docs/wiki-agent.md");
+        TOPICS.put("Wiki 대화 수집",            "docs/wiki-conversation-ingest.md");
     }
 
     /**

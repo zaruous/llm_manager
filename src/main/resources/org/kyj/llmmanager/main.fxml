@@ -136,8 +136,8 @@
                                                style="-fx-font-family:monospace; -fx-font-size:11px;"
                                                GridPane.columnIndex="2" GridPane.rowIndex="1"/>
 
-                                        <!-- JVM 힙 -->
-                                        <Label text="JVM 힙"
+                                        <!-- 관리 메모리 -->
+                                        <Label text="관리 메모리"
                                                style="-fx-text-fill:#888888; -fx-font-size:11px;"
                                                GridPane.columnIndex="0" GridPane.rowIndex="2"/>
                                         <ProgressBar fx:id="jvmBar" maxWidth="Infinity"

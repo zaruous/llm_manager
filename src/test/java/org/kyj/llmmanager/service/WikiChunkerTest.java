@@ -37,6 +37,8 @@ class WikiChunkerTest {
         List<WikiChunker.Chunk> chunks = WikiChunker.chunk(f, "sources");
         assertEquals(1, chunks.size());
         assertEquals(0, chunks.get(0).chunkNo());
+        assertTrue(chunks.get(0).content().contains("제목: page"));
+        assertTrue(chunks.get(0).content().contains("경로:"));
         assertTrue(chunks.get(0).content().contains("단순 본문"));
     }
 
@@ -55,9 +57,9 @@ class WikiChunkerTest {
                 """);
         List<WikiChunker.Chunk> chunks = WikiChunker.chunk(f, "concepts");
         assertEquals(3, chunks.size());
-        assertTrue(chunks.get(0).content().startsWith("## 개요"));
-        assertTrue(chunks.get(1).content().startsWith("## 상세"));
-        assertTrue(chunks.get(2).content().startsWith("## 결론"));
+        assertTrue(chunks.get(0).content().contains("섹션: 개요"));
+        assertTrue(chunks.get(1).content().contains("섹션: 상세"));
+        assertTrue(chunks.get(2).content().contains("섹션: 결론"));
     }
 
     @Test
@@ -84,8 +86,7 @@ class WikiChunkerTest {
                 """);
         List<WikiChunker.Chunk> chunks = WikiChunker.chunk(f, "entities");
         assertEquals(1, chunks.size());
-        // h1 제목도 본문에 포함
-        assertTrue(chunks.get(0).content().contains("# 제목"));
+        assertTrue(chunks.get(0).content().contains("제목: 제목"));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -159,34 +160,36 @@ class WikiChunkerTest {
     // ─────────────────────────────────────────────────────────────
 
     @Test
-    void largeSection_splitBySlideWindow(@TempDir Path dir) throws IOException {
-        // 800자 초과 섹션 → 여러 청크로 분할
-        String longContent = "가".repeat(900); // 900자
+    void largeSection_splitByConfiguredMaximum(@TempDir Path dir) throws IOException {
+        String longContent = "가".repeat(3000);
         Path f = dir.resolve("large.md");
         Files.writeString(f, "## 긴 섹션\n" + longContent);
-        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(f, "sources");
-        // 900자 → 첫 청크 800자, 두 번째 청크 300자 (overlap 포함 시작: 900-800=100, start=800-200=600)
+        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(
+                f, "sources", "wiki/sources/large.md",
+                new WikiPreprocessor.Options(700, 900, 100));
         assertTrue(chunks.size() >= 2);
-        // 모든 청크가 MAX_CHUNK_CHARS 이하여야 한다
         for (WikiChunker.Chunk c : chunks) {
-            assertTrue(c.content().length() <= 800,
+            // 메타데이터 헤더가 추가되므로 본문 최대값보다 소폭 길다.
+            assertTrue(c.content().length() <= 1100,
                     "청크 길이 초과: " + c.content().length());
         }
     }
 
     @Test
     void overlapExists_inSubsequentChunks(@TempDir Path dir) throws IOException {
-        // OVERLAP_CHARS=200 만큼 이전 청크 끝이 다음 청크 앞에 포함되어야 한다
-        String longContent = "A".repeat(800) + "B".repeat(400); // 1200자
+        String longContent = "A".repeat(900) + "B".repeat(500);
         Path f = dir.resolve("overlap.md");
         Files.writeString(f, "## 섹션\n" + longContent);
-        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(f, "sources");
+        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(
+                f, "sources", "wiki/sources/overlap.md",
+                new WikiPreprocessor.Options(500, 700, 100));
         assertTrue(chunks.size() >= 2);
-        // 첫 청크의 마지막 200자가 두 번째 청크의 시작 부분에 포함되어야 한다
-        String firstEnd = chunks.get(0).content().substring(
-                Math.max(0, chunks.get(0).content().length() - 200));
-        assertTrue(chunks.get(1).content().startsWith(firstEnd.substring(0, 50)),
-                "두 번째 청크가 첫 청크의 끝 부분으로 시작해야 한다 (overlap)");
+        String firstBody = chunks.get(0).content().substring(
+                chunks.get(0).content().indexOf("\n\n") + 2);
+        String secondBody = chunks.get(1).content().substring(
+                chunks.get(1).content().indexOf("\n\n") + 2);
+        assertTrue(secondBody.startsWith(firstBody.substring(firstBody.length() - 50)),
+                "두 번째 청크 본문이 첫 청크의 끝 문맥으로 시작해야 한다");
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -195,13 +198,11 @@ class WikiChunkerTest {
 
     @Test
     void contentHash_sameTextProducesSameHash(@TempDir Path dir) throws IOException {
-        Path f1 = dir.resolve("a.md");
-        Path f2 = dir.resolve("b.md");
+        Path f1 = dir.resolve("same.md");
         String content = "## 동일 내용\n텍스트가 같습니다.";
         Files.writeString(f1, content);
-        Files.writeString(f2, content);
         List<WikiChunker.Chunk> c1 = WikiChunker.chunk(f1, "entities");
-        List<WikiChunker.Chunk> c2 = WikiChunker.chunk(f2, "entities");
+        List<WikiChunker.Chunk> c2 = WikiChunker.chunk(f1, "entities");
         assertFalse(c1.isEmpty());
         assertEquals(c1.get(0).contentHash(), c2.get(0).contentHash());
     }
@@ -262,5 +263,80 @@ class WikiChunkerTest {
         Path missing = Path.of("/nonexistent/path/file.md");
         List<WikiChunker.Chunk> chunks = WikiChunker.chunk(missing, "entities");
         assertTrue(chunks.isEmpty());
+    }
+
+    @Test
+    void metadataInjected_whenFormatterDidNotCreateFrontmatter(@TempDir Path dir)
+            throws IOException {
+        Path f = dir.resolve("BGE-M3.md");
+        Files.writeString(f, """
+                # BGE-M3 검색 설계
+
+                ## 증분 색인
+                변경된 청크만 임베딩한다.
+                """);
+
+        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(
+                f, "concepts", "wiki/concepts/BGE-M3.md",
+                WikiPreprocessor.Options.defaults());
+
+        assertEquals(1, chunks.size());
+        String content = chunks.get(0).content();
+        assertTrue(content.contains("제목: BGE-M3 검색 설계"));
+        assertTrue(content.contains("유형: concepts"));
+        assertTrue(content.contains("경로: wiki/concepts/BGE-M3.md"));
+        assertTrue(content.contains("섹션: 증분 색인"));
+    }
+
+    @Test
+    void yamlListTags_normalizedForEmbedding(@TempDir Path dir) throws IOException {
+        Path f = dir.resolve("page.md");
+        Files.writeString(f, """
+                ---
+                title: 검색 설계
+                type: concept
+                tags:
+                  - embedding
+                  - vector-search
+                sources: []
+                last_updated: 2026-06-21
+                ---
+                ## 개요
+                본문
+                """);
+
+        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(
+                f, "concepts", "wiki/concepts/page.md",
+                WikiPreprocessor.Options.defaults());
+
+        assertEquals("embedding, vector-search", chunks.get(0).tags());
+        assertTrue(chunks.get(0).content().contains("태그: embedding, vector-search"));
+    }
+
+    @Test
+    void codeFence_keptInSingleChunk(@TempDir Path dir) throws IOException {
+        Path f = dir.resolve("code.md");
+        Files.writeString(f, """
+                ## 예제
+                앞 문단입니다.
+
+                ```java
+                String value = "%s";
+                System.out.println(value);
+                ```
+
+                뒤 문단입니다.
+                """.formatted("x".repeat(900)));
+
+        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(
+                f, "concepts", "wiki/concepts/code.md",
+                new WikiPreprocessor.Options(300, 500, 50));
+
+        long codeChunks = chunks.stream()
+                .filter(chunk -> chunk.content().contains("```java"))
+                .count();
+        assertEquals(1, codeChunks);
+        assertTrue(chunks.stream().anyMatch(chunk ->
+                chunk.content().contains("System.out.println(value);")));
     }
 }

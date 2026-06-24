@@ -79,7 +79,7 @@ LLMManager/
 
 ## 빌드 상태
 
-`./gradlew build` 정상 통과 (2026-06-10 기준).
+`./gradlew build` 정상 통과 (2026-06-25 기준).
 
 - `BuiltinServiceLoader` 제거 → `ServicePackLoader`로 일원화
 - `service-packs/` 디렉토리: `bgem3-embedding.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`
@@ -113,6 +113,29 @@ LLMManager/
   `PluginCommandExecutor.cancel(commandId)` → `destroyProcessTree()`로 자식까지 종료.
   워크스페이스 선택은 `wiki.defaultCwd`에 자동 영속화(`WikiWorkspaceInitializer.rememberWorkspace`).
   사이드카 env 화이트리스트에 APPDATA 필수 — 없으면 `npm root -g`가 깨져 글로벌 SDK 탐색 실패
+
+### Wiki Vector MCP + 버그 수정 (2026-06-25, feature/wiki-vector-mcp)
+
+- **wiki_ingest 파라미터 재설계**: `title`, `content`, `desc=""`, `tags=""` — 저장 시 YAML
+  frontmatter(`title`·`desc`·`tags`·`ingest_at`) + 마크다운 본문으로 스테이징 파일 생성
+- **AGENTS.md 번들링 3중 보장**
+  - `WikiWorkspaceInitializer` SKELETON 맵에 `/llm-skills/wiki-agent/AGENTS.md` 추가
+  - `server.py`: 워크스페이스에 AGENTS.md 없으면 번들 파일에서 자동 복사
+  - `wiki-mcp.yml` Groovy 스크립트: 설치 시 `plugins/wiki-agent/AGENTS.md` → installDir 복사
+- **워크스페이스 초기화 UX**
+  - `WikiBrowserDialog`: `wiki/index.md` 없으면 초기화 확인 → `WikiWorkspaceInitializer.initialize()`
+  - `WikiQueryDialog`: 워크스페이스 미초기화 시 submit 전 확인 다이얼로그
+  - `SettingsDialog`: `wiki.defaultCwd` 저장 시 미초기화 워크스페이스이면 초기화 제안
+- **워크스페이스 찾기 버튼 제거**: `WikiQueryDialog`·`WikiIngestDialog`에서 제거
+  (설정 → 환경설정에서 일원화, `WikiBrowserDialog`만 유지)
+- **버그 수정**
+  - `onUninstall()`: 실행 중 제거 동의 시 `stop()` 먼저 호출 (PID 잔류 방지)
+  - WebView `IllegalAccessError`: `build.gradle`에 `--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED` 추가 (applicationDefaultJvmArgs·startScripts·jpackage 세 곳)
+- **관리 메모리 게이지** (대시보드 시스템 리소스 패널)
+  - "JVM 힙" → "관리 메모리": OSHI `OperatingSystem.getProcess(pid).getResidentSetSize()` 합산
+  - `SystemMonitorService`: `trackedPids[]` + `managedRss` volatile 필드, 백그라운드 `collect()`에서 2초마다 RSS 합산
+  - `MainController.refreshTrackedPids()`: `updateSystemStats()` (2초 주기 Timeline) 에서 호출해 PID 설정 타이밍과 무관하게 항상 최신 목록 유지
+  - 실행 중 서비스 없으면 "서비스 없음" 표시
 
 ---
 

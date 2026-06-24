@@ -1529,6 +1529,18 @@ public class MainController implements Initializable {
         long running = instanceList.stream()
                 .filter(i -> i.getStatus() == ServiceStatus.RUNNING).count();
         statusBarLabel.setText("서비스: " + instanceList.size() + "개  |  실행중: " + running + "개");
+        refreshTrackedPids();
+    }
+
+    /** RUNNING 상태 서비스의 PID 목록을 SystemMonitorService에 전달한다. */
+    private void refreshTrackedPids() {
+        SystemMonitorService mon = ctx == null ? null : ctx.getSystemMonitor();
+        if (mon == null) return;
+        long[] pids = instanceList.stream()
+                .filter(i -> i.getStatus() == ServiceStatus.RUNNING && i.getPid() > 0)
+                .mapToLong(ServiceInstance::getPid)
+                .toArray();
+        mon.setTrackedPids(pids);
     }
 
     // =========================================================
@@ -1543,6 +1555,8 @@ public class MainController implements Initializable {
         if (ctx == null || cpuBar == null) return;
         SystemMonitorService mon = ctx.getSystemMonitor();
         if (mon == null) return;
+        // 2초 주기마다 PID 목록을 갱신 — 대시보드 카드에서 시작했거나 PID가 늦게 설정된 경우를 포함
+        refreshTrackedPids();
 
         // ── CPU ──────────────────────────────────────────────
         double cpu = Math.max(0, Math.min(1, mon.getCpuLoad()));
@@ -1562,17 +1576,17 @@ public class MainController implements Initializable {
                 SystemMonitorService.formatBytes(totalMem),
                 memRatio * 100));
 
-        // ── JVM 힙 ───────────────────────────────────────────
-        Runtime rt      = Runtime.getRuntime();
-        long jvmUsed    = rt.totalMemory() - rt.freeMemory();
-        long jvmMax     = rt.maxMemory();
-        double jvmRatio = jvmMax > 0 ? (double) jvmUsed / jvmMax : 0;
-        jvmBar.setProgress(jvmRatio);
-        jvmBar.setStyle("-fx-accent: " + gaugeColor(jvmRatio) + ";");
-        jvmLabel.setText(String.format("%s / %s  (%4.1f %%)",
-                SystemMonitorService.formatBytes(jvmUsed),
-                SystemMonitorService.formatBytes(jvmMax),
-                jvmRatio * 100));
+        // ── 관리 메모리 (실행 중인 서비스 프로세스 RSS 합계) ──
+        long rssUsed  = mon.getManagedRss();
+        double rssRatio = totalMem > 0 ? (double) rssUsed / totalMem : 0;
+        jvmBar.setProgress(rssRatio);
+        jvmBar.setStyle("-fx-accent: " + gaugeColor(rssRatio) + ";");
+        jvmLabel.setText(rssUsed > 0
+                ? String.format("%s / %s  (%4.1f %%)",
+                        SystemMonitorService.formatBytes(rssUsed),
+                        SystemMonitorService.formatBytes(totalMem),
+                        rssRatio * 100)
+                : "서비스 없음");
     }
 
     /**

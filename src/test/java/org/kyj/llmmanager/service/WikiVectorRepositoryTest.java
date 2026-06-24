@@ -151,6 +151,22 @@ class WikiVectorRepositoryTest {
         }
     }
 
+    @Test
+    void deleteChunksFrom_removesStaleTailOnly(@TempDir Path workspace) throws SQLException {
+        try (WikiVectorRepository repo = new WikiVectorRepository(workspace, "")) {
+            float[] emb = unitVec(4);
+            for (int i = 0; i < 4; i++) {
+                repo.upsertChunk("wiki/A.md",
+                        makeChunk(i, "hash" + String.format("%012d", i)), emb);
+            }
+
+            repo.deleteChunksFrom("wiki/A.md", 2);
+
+            Map<Integer, String> hashes = repo.getChunkHashes("wiki/A.md");
+            assertEquals(Set.of(0, 1), hashes.keySet());
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────
     // 선형 탐색 (vec0 없는 폴백 — cosineSimilarity 간접 검증)
     // ─────────────────────────────────────────────────────────────

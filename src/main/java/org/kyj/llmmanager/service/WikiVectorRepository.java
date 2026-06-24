@@ -178,6 +178,41 @@ public class WikiVectorRepository implements Closeable {
     }
 
     /**
+     * 특정 번호부터 페이지 끝까지의 잔여 청크와 임베딩을 삭제한다.
+     * 페이지 내용이 줄어든 뒤 과거 청크가 검색되는 것을 방지한다.
+     *
+     * @param pagePath    워크스페이스 상대 경로
+     * @param firstChunkNo 삭제를 시작할 0-based 청크 번호
+     */
+    public synchronized void deleteChunksFrom(String pagePath, int firstChunkNo) throws SQLException {
+        ensureSchema();
+        try (Connection conn = connect()) {
+            List<Long> ids = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id FROM chunks WHERE page_path = ? AND chunk_no >= ?")) {
+                ps.setString(1, pagePath);
+                ps.setInt(2, firstChunkNo);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) ids.add(rs.getLong(1));
+                }
+            }
+            for (long id : ids) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM chunk_embeddings WHERE rowid = ?")) {
+                    ps.setLong(1, id);
+                    ps.executeUpdate();
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM chunks WHERE page_path = ? AND chunk_no >= ?")) {
+                ps.setString(1, pagePath);
+                ps.setInt(2, firstChunkNo);
+                ps.executeUpdate();
+            }
+        }
+    }
+
+    /**
      * 색인된 모든 페이지 경로를 반환한다. 고아 페이지 정리에 사용.
      *
      * @return 현재 DB에 청크가 있는 page_path 집합
