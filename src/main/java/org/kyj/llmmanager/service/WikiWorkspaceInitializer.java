@@ -20,6 +20,7 @@ public final class WikiWorkspaceInitializer {
 
     /** 내장 리소스 경로 → 워크스페이스 상대 경로 (wiki-skeleton 팩과 동일 구성) */
     private static final Map<String, String> SKELETON = Map.of(
+            "/llm-skills/wiki-agent/AGENTS.md", "AGENTS.md",
             "/llm-skills/wiki-agent/wiki-index-template.md", "wiki/index.md",
             "/llm-skills/wiki-agent/wiki-log-template.md", "wiki/log.md",
             "/llm-skills/wiki-agent/graph-gitignore", "graph/.gitignore",

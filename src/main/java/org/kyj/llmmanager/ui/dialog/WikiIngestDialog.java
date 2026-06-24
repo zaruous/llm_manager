@@ -100,12 +100,11 @@ public class WikiIngestDialog {
         var ctx = AppContext.getInstance();
         var settings = ctx.getAppSettingsRepository().get();
 
-        TextField workspaceField = new TextField(
-                settings.getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", ""));
-        workspaceField.setPromptText("위키 워크스페이스 디렉토리");
-        Button browseBtn = new Button("찾기");
-        browseBtn.setOnAction(e -> chooseDirectoryInto(stage, workspaceField, "위키 워크스페이스 선택"));
-        HBox workspaceRow = new HBox(8, new Label("워크스페이스:"), workspaceField, browseBtn);
+        String defaultCwd = settings.getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
+        TextField workspaceField = new TextField(defaultCwd);
+        workspaceField.setEditable(false);
+        workspaceField.setPromptText("설정 > wiki-agent > 기본 워크스페이스에서 지정");
+        HBox workspaceRow = new HBox(8, new Label("워크스페이스:"), workspaceField);
         workspaceRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(workspaceField, Priority.ALWAYS);
 
@@ -187,7 +186,7 @@ public class WikiIngestDialog {
 
         // 실행 중 선택 목록 편집을 막는다 — 백그라운드 스레드가 순회하는 동안
         // UI에서 목록이 바뀌면 ConcurrentModificationException이 날 수 있음
-        List<Button> editButtons = List.of(addFilesBtn, addDirBtn, removeBtn, browseBtn);
+        List<Button> editButtons = List.of(addFilesBtn, addDirBtn, removeBtn);
         Runnable enterRunning = () -> {
             runBtn.setDisable(true);
             stopBtn.setDisable(false);

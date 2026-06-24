@@ -841,7 +841,7 @@ public class MainController implements Initializable {
         if (selectedInstance == null) return;
         ServiceDefinition def = selectedInstance.getDefinition();
 
-        // 서비스가 실행 중이면 먼저 경고 확인
+        // 서비스가 실행 중이면 먼저 중지 여부 확인
         if (selectedInstance.getStatus() == ServiceStatus.RUNNING
                 || selectedInstance.getStatus() == ServiceStatus.STARTING) {
             Alert warn = new Alert(Alert.AlertType.WARNING,
@@ -850,6 +850,8 @@ public class MainController implements Initializable {
             warn.setTitle("실행 중 제거 경고");
             Optional<ButtonType> result = warn.showAndWait();
             if (result.isEmpty() || result.get() != ButtonType.YES) return;
+            // 사용자가 제거에 동의한 경우 프로세스를 먼저 종료
+            ctx.getProcessManager().stop(selectedInstance);
         }
 
         // installDir이 있으면 런타임 타입과 무관하게 디렉토리 삭제 여부 확인

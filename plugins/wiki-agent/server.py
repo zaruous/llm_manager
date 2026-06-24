@@ -7,15 +7,22 @@ groovyScript가 --db-path, --vec0-path를 자동 주입하며,
 """
 
 import argparse
+import base64
+import fnmatch
+import hashlib
 import json
+import os
 import re
+import shutil
 import sqlite3
 import statistics
 import struct
+import subprocess
 import sys
+import threading
 import urllib.request
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 # fastmcp는 설치 명령(pip install fastmcp)으로 제공된다.
@@ -36,6 +43,11 @@ parser.add_argument("--vec0-path", default="", help="vec0.dll/.so 경로 (자동
 parser.add_argument("--embedding-url", default="http://localhost:18080", help="BGE-M3 서버 URL")
 parser.add_argument("--port", type=int, default=18090, help="MCP 서버 포트")
 parser.add_argument("--enable-write", action="store_true", help="wiki_ingest 도구 활성화")
+parser.add_argument("--cursor-sidecar", default="", help="Cursor Agent sidecar 스크립트 경로")
+parser.add_argument("--cursor-model", default="", help="Cursor 모델 (비우면 플러그인 설정 사용)")
+parser.add_argument("--cursor-timeout", type=int, default=-1, help="실행 제한(초, -1=플러그인 설정, 0=무제한)")
+parser.add_argument("--plugin-config", default="", help="wiki-agent plugin.json 경로")
+parser.add_argument("--settings-path", default="", help="LLM Manager settings.json 경로")
 args = parser.parse_args()
 
 WORKSPACE = Path(args.workspace).resolve()
@@ -45,7 +57,22 @@ EMBEDDING_URL = args.embedding_url.rstrip("/")
 WIKI_DIR = WORKSPACE / "wiki" if (WORKSPACE / "wiki" / "index.md").is_file() else WORKSPACE
 META_PAGE_NAMES = {"index.md", "log.md", "lint-report.md", "health-report.md"}
 STUB_THRESHOLD_CHARS = 100
-
+INGEST_LOCK = threading.Lock()
+CURSOR_SIDECAR = (
+    Path(args.cursor_sidecar).resolve()
+    if args.cursor_sidecar
+    else Path(__file__).resolve().parent / "cursor-agent-sidecar.js"
+)
+PLUGIN_CONFIG = (
+    Path(args.plugin_config).resolve()
+    if args.plugin_config
+    else Path(__file__).resolve().parent / "plugin.json"
+)
+SETTINGS_PATH = (
+    Path(args.settings_path).expanduser().resolve()
+    if args.settings_path
+    else Path.home() / "llm-services" / "settings.json"
+)
 mcp = FastMCP("wiki-mcp")
 
 
@@ -119,6 +146,274 @@ def _resolve_page(page_path: str) -> Path:
         return fallback
     except ValueError:
         return WORKSPACE / Path(clean).name
+
+
+def _safe_filename(value: str, fallback: str = "mcp-ingest") -> str:
+    """사용자 입력을 raw 스테이징에 안전한 파일명으로 정규화한다."""
+    stem = Path(value).stem if value else fallback
+    safe = re.sub(r"[^0-9A-Za-z가-힣._-]+", "-", stem).strip("._-")
+    return (safe or fallback)[:100]
+
+
+def _read_json_file(path: Path) -> dict:
+    """설정 파일이 없거나 손상되어도 서버 시작을 막지 않고 빈 설정으로 폴백한다."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _ingest_config() -> dict:
+    """wiki-agent plugin.json에서 필수 ingest 설정을 읽고 형식을 검증한다."""
+    config = _read_json_file(PLUGIN_CONFIG)
+    if not config:
+        raise ValueError(f"wiki-agent 설정 파일을 읽을 수 없습니다: {PLUGIN_CONFIG}")
+
+    ingest = config.get("ingest")
+    if not isinstance(ingest, dict):
+        raise ValueError(f"wiki-agent 설정에 ingest 객체가 없습니다: {PLUGIN_CONFIG}")
+
+    includes = ingest.get("include")
+    excludes = ingest.get("exclude")
+    if not isinstance(includes, list) or not all(isinstance(item, str) for item in includes):
+        raise ValueError("wiki-agent ingest.include는 문자열 배열이어야 합니다.")
+    if not isinstance(excludes, list) or not all(isinstance(item, str) for item in excludes):
+        raise ValueError("wiki-agent ingest.exclude는 문자열 배열이어야 합니다.")
+    content_max_bytes = ingest.get("contentMaxBytes")
+    if not isinstance(content_max_bytes, int) or content_max_bytes <= 0:
+        raise ValueError("wiki-agent ingest.contentMaxBytes는 양의 정수여야 합니다.")
+    staging_directory = ingest.get("stagingDirectory")
+    if not isinstance(staging_directory, str) or not staging_directory.strip():
+        raise ValueError("wiki-agent ingest.stagingDirectory는 비어 있지 않은 문자열이어야 합니다.")
+    return ingest
+
+
+def _ingest_rules() -> tuple[list[str], list[str]]:
+    """검증된 ingest 설정에서 include/exclude 규칙을 반환한다."""
+    ingest = _ingest_config()
+    includes = ingest["include"]
+    excludes = ingest["exclude"]
+    return includes, excludes
+
+
+def _plugin_settings(plugin_id: str) -> dict:
+    """LLM Manager settings.json에서 지정 플러그인의 비밀값 제외 설정을 읽는다."""
+    plugin_settings = _read_json_file(SETTINGS_PATH).get("pluginSettings", {})
+    if not isinstance(plugin_settings, dict):
+        return {}
+    values = plugin_settings.get(plugin_id, {})
+    return values if isinstance(values, dict) else {}
+
+
+def _glob_matches(value: str, pattern: str) -> bool:
+    """GUI의 gitignore 스타일 선행 **/가 루트 경로도 포함하도록 보정한다."""
+    normalized = pattern.lower()
+    return (
+        fnmatch.fnmatch(value, normalized)
+        or (normalized.startswith("**/")
+            and fnmatch.fnmatch(value, normalized[3:]))
+    )
+
+
+def _matches_ingest_rules(path: Path) -> tuple[bool, str]:
+    """GUI ingest와 같은 plugin.json 규칙으로 file_path 허용 여부를 판정한다."""
+    includes, excludes = _ingest_rules()
+    filename = path.name.lower()
+    if includes and not any(_glob_matches(filename, str(pattern))
+                            for pattern in includes):
+        return False, f"wiki-agent ingest.include에 허용되지 않은 파일입니다: {path.name}"
+
+    try:
+        candidate = path.relative_to(WORKSPACE).as_posix()
+    except ValueError:
+        candidate = path.as_posix()
+    candidate = candidate.lower()
+    if any(_glob_matches(candidate, str(pattern)) for pattern in excludes):
+        return False, f"wiki-agent ingest.exclude에 해당하는 파일입니다: {path}"
+    return True, ""
+
+
+def _resolve_cursor_options() -> tuple[str, int | None]:
+    """서버 기동 인수와 플러그인 설정에서 Cursor 모델·타임아웃을 결정한다."""
+    cursor_settings = _plugin_settings("cursor-agent-runner")
+    wiki_settings = _plugin_settings("wiki-agent")
+
+    model = args.cursor_model.strip()
+    if not model:
+        model = str(cursor_settings.get("cursor.defaultModel", "auto")).strip() or "auto"
+
+    if args.cursor_timeout >= 0:
+        timeout = args.cursor_timeout or None
+    else:
+        raw_minutes = str(wiki_settings.get("timeoutMinutes", "")).strip()
+        try:
+            timeout = max(0, int(raw_minutes) * 60) or None
+        except ValueError:
+            timeout = None
+    return model, timeout
+
+
+def _file_digest(path: Path) -> str:
+    """큰 파일을 메모리에 전부 올리지 않고 내용 식별자를 계산한다."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()[:12]
+
+
+def _stage_ingest_source(title: str, content: str, desc: str, tags: str) -> Path:
+    """YAML frontmatter + 마크다운 본문을 workspace/raw/mcp-ingest 아래 불변 파일로 저장한다."""
+    if not content.strip():
+        raise ValueError("content는 비울 수 없습니다.")
+
+    ingest = _ingest_config()
+    staging_root = (WORKSPACE / ingest["stagingDirectory"]).resolve()
+    try:
+        staging_root.relative_to(WORKSPACE)
+    except ValueError as exc:
+        raise ValueError(
+            "wiki-agent ingest.stagingDirectory는 워크스페이스 내부 경로여야 합니다."
+        ) from exc
+
+    day_dir = staging_root / date.today().isoformat()
+    day_dir.mkdir(parents=True, exist_ok=True)
+
+    # YAML frontmatter 조립
+    fm = ["---", f"title: {title}"]
+    if desc.strip():
+        fm.append(f"desc: {desc.strip()}")
+    if tags.strip():
+        fm.append(f"tags: [{tags.strip()}]")
+    fm.append(f"ingest_at: {datetime.now().isoformat(timespec='seconds')}")
+    fm.append("---")
+    fm.append("")
+
+    document = "\n".join(fm) + content.strip() + "\n"
+    encoded = document.encode("utf-8")
+
+    content_max_bytes = ingest["contentMaxBytes"]
+    if len(encoded) > content_max_bytes:
+        raise ValueError(
+            f"content는 최대 {content_max_bytes}바이트까지 입력할 수 있습니다."
+        )
+
+    base = _safe_filename(title)
+    digest = hashlib.sha256(encoded).hexdigest()[:12]
+    target = day_dir / f"{base}-{digest}.md"
+    if not target.exists():
+        target.write_bytes(encoded)
+    return target
+
+
+def _sync_wiki_tools() -> None:
+    """설치된 wiki-agent 도구를 워크스페이스에 동기화해 GUI ingest와 실행 조건을 맞춘다."""
+    source_dir = Path(__file__).resolve().parent / "tools"
+    if not source_dir.is_dir():
+        return
+    target_dir = WORKSPACE / "tools"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for source in source_dir.glob("*.py"):
+        shutil.copy2(source, target_dir / source.name)
+
+
+def _run_cursor_ingest(source: Path) -> tuple[bool, str]:
+    """기존 Cursor sidecar를 사용해 AGENTS.md 기반 ingest를 실행한다."""
+    if not CURSOR_SIDECAR.is_file():
+        return False, f"Cursor sidecar 스크립트가 없습니다: {CURSOR_SIDECAR}"
+    agents_md = WORKSPACE / "AGENTS.md"
+    if not agents_md.is_file():
+        # server.py 옆에 번들된 AGENTS.md를 워크스페이스에 자동 설치
+        bundled = Path(__file__).resolve().parent / "AGENTS.md"
+        if not bundled.is_file():
+            return False, "AGENTS.md가 없습니다. LLM Wiki Agent 골격을 먼저 설치하세요."
+        shutil.copy2(bundled, agents_md)
+    if not os.getenv("CURSOR_API_KEY"):
+        return False, "CURSOR_API_KEY 환경변수가 없습니다."
+
+    try:
+        _sync_wiki_tools()
+    except OSError as exc:
+        return False, f"wiki-agent 도구 동기화 실패: {exc}"
+
+    resolved_model, timeout = _resolve_cursor_options()
+    try:
+        includes, excludes = _ingest_rules()
+    except ValueError as exc:
+        return False, str(exc)
+    relative_source = _relative(source)
+    prompt = (
+        "Follow the wiki workflow defined in AGENTS.md. "
+        "Ingest the following staged source file into the wiki. "
+        "Treat the file as immutable source material. If it was already ingested and the "
+        "corresponding wiki/sources page is up to date, skip it and report that result. "
+        "Create or update the source page, index, overview, entity/concept pages, "
+        "contradictions, log, and run post-ingest validation. "
+        "Honor the wiki-agent plugin ingest configuration when handling sources. "
+        f"Configured include patterns: {json.dumps(includes, ensure_ascii=False)}. "
+        f"Configured exclude patterns: {json.dumps(excludes, ensure_ascii=False)}. "
+        f"Source file: {relative_source}"
+    )
+    payload = {
+        "commandId": "wiki.ingest",
+        "cwd": str(WORKSPACE),
+        "prompt": prompt,
+        "model": resolved_model,
+        "mode": "sdk",
+    }
+    encoded = base64.b64encode(
+        json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+    env = os.environ.copy()
+    env["LLM_MANAGER_STREAM"] = "1"
+
+    try:
+        result = subprocess.run(
+            ["node", str(CURSOR_SIDECAR), encoded],
+            cwd=WORKSPACE,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False, "Node.js 실행 파일을 찾을 수 없습니다."
+    except subprocess.TimeoutExpired:
+        return False, f"Cursor Agent 실행 시간이 초과되었습니다 ({timeout}초)."
+    except Exception as exc:
+        return False, f"Cursor Agent 실행 실패: {exc}"
+
+    output_lines = []
+    final_success = result.returncode == 0
+    for line in result.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            if line.strip():
+                output_lines.append(line.strip())
+            continue
+        event_type = event.get("type", "")
+        message = str(event.get("message", "")).strip()
+        if event_type == "error":
+            final_success = False
+        if event_type == "done":
+            final_success = final_success and bool(event.get("success", True))
+        if message and event_type in {"text", "done", "error"}:
+            output_lines.append(message)
+
+    if result.stderr.strip():
+        output_lines.append(result.stderr.strip())
+    summary = "\n".join(output_lines).strip()
+    if not summary:
+        summary = f"Cursor Agent 종료 코드: {result.returncode}"
+    # MCP 응답이 과도하게 커지는 것을 막되 최종 결과는 보존한다.
+    if len(summary) > 20000:
+        summary = "...(앞부분 생략)...\n" + summary[-20000:]
+    return final_success, summary
 
 
 def _page_type(path: Path) -> str:
@@ -952,15 +1247,46 @@ def wiki_lint(save: bool = False, as_json: bool = False) -> str:
 
 if args.enable_write:
     @mcp.tool()
-    def wiki_ingest(workspace: str = "") -> str:
+    def wiki_ingest(
+        title: str,
+        content: str,
+        desc: str = "",
+        tags: str = "",
+    ) -> str:
         """
-        위키 워크스페이스 전체를 재색인합니다.
-        LLM Manager의 '벡터 재색인' 메뉴를 사용하는 것을 권장합니다.
-        이 도구는 --enable-write 옵션이 활성화된 경우에만 사용할 수 있습니다.
+        마크다운 내용을 YAML frontmatter와 함께 raw/mcp-ingest/에 불변 저장한 뒤
+        Cursor Agent로 위키에 수집합니다.
+        서버 시작 시 --workspace로 지정된 워크스페이스만 수정합니다.
+        이 도구는 --enable-write 옵션이 활성화된 경우에만 노출됩니다.
+
+        Args:
+            title: 위키 페이지 제목 (파일명 슬러그로 자동 변환)
+            content: 마크다운 본문 (필수)
+            desc: 한 줄 요약 — Cursor Agent 컨텍스트로 전달
+            tags: 콤마 구분 태그 — 위키 분류·링크 힌트 (예: "AI, Claude, LLM")
         """
-        return (
-            "이 도구는 MCP 서버에서 직접 색인 실행을 지원하지 않습니다.\n"
-            "LLM Manager의 플러그인 메뉴 > '벡터 재색인 (전체)'을 사용해 주세요."
+        with INGEST_LOCK:
+            started_at = datetime.now().isoformat(timespec="seconds")
+            try:
+                staged = _stage_ingest_source(title, content, desc, tags)
+            except ValueError as exc:
+                return json.dumps(
+                    {"success": False, "error": str(exc)},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+            success, message = _run_cursor_ingest(staged)
+        return json.dumps(
+            {
+                "success": success,
+                "workspace": str(WORKSPACE),
+                "staged_source": _relative(staged),
+                "started_at": started_at,
+                "message": message,
+            },
+            ensure_ascii=False,
+            indent=2,
         )
 
 

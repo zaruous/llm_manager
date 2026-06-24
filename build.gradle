@@ -94,6 +94,10 @@ jacocoTestReport {
 
 application {
     mainClass = 'org.kyj.llmmanager.LlmManagerApp'
+    // WebView(NGWebView)가 javafx.graphics 내부 패키지에 접근할 수 있도록 열어준다
+    applicationDefaultJvmArgs = [
+        '--add-opens', 'javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED',
+    ]
 }
 
 // 배포판 시작 스크립트: JavaFX JAR 만 --module-path 에 분리
@@ -106,9 +110,10 @@ startScripts {
         // Windows .bat
         def bat = windowsScript.text
         def mpWin = javafxJarNames.collect { '%APP_HOME%\\lib\\' + it }.join(';')
+        def addOpens = '--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED'
         bat = bat.replace(
             'set DEFAULT_JVM_OPTS=',
-            "set DEFAULT_JVM_OPTS=--module-path \"${mpWin}\" --add-modules javafx.controls,javafx.fxml,javafx.graphics,javafx.base"
+            "set DEFAULT_JVM_OPTS=--module-path \"${mpWin}\" --add-modules javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base ${addOpens}"
         )
         windowsScript.text = bat
 
@@ -117,7 +122,7 @@ startScripts {
         def mpUnix = javafxJarNames.collect { '$APP_HOME/lib/' + it }.join(':')
         sh = sh.replace(
             'DEFAULT_JVM_OPTS=""',
-            "DEFAULT_JVM_OPTS=\"--module-path \\\"${mpUnix}\\\" --add-modules javafx.controls,javafx.fxml,javafx.graphics,javafx.base\""
+            "DEFAULT_JVM_OPTS=\"--module-path \\\"${mpUnix}\\\" --add-modules javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base ${addOpens}\""
         )
         unixScript.text = sh
     }
@@ -389,6 +394,7 @@ List<String> buildJpackageArgs(String type, Project proj) {
         '--java-options', "--add-modules ${javafxMods}",
         '--java-options', '-Xmx512m',
         '--java-options', '--add-opens java.base/java.lang=ALL-UNNAMED',
+        '--java-options', '--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED',
     ]
 
     def iconFile = resolvePackageIconFile(proj)

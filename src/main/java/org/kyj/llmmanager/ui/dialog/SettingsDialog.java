@@ -21,6 +21,7 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -369,9 +370,34 @@ public class SettingsDialog {
                 }
                 box.getChildren().add(grid);
             }
+            if ("wiki-agent".equals(contribution.pluginId())) {
+                box.getChildren().add(new Separator());
+                box.getChildren().add(createWikiIndexMetadataSection(stage));
+            }
 
             tabPane.getTabs().add(tab(contribution.tab().getTitle(), box));
         }
+    }
+
+    private VBox createWikiIndexMetadataSection(Stage stage) {
+        Label title = sectionLabel("수집·임베딩 크기 정책 및 색인 메타데이터");
+        Label explanation = new Label("""
+                • contentMaxBytes(현재 10 MiB): MCP wiki_ingest의 content 필드에 직접 넣는 \
+                UTF-8 원문만 제한합니다. file_path, Cursor 요약, 임베딩 청크 제한은 아닙니다.
+                • Cursor 수집: 작은 파일은 5개·512 KiB 배치, 200 KiB 초과 텍스트는 \
+                40,000자 목표·60,000자 상한 섹션으로 나눠 요약합니다. 4 MiB 초과 PDF는 \
+                5페이지씩 판독합니다.
+                • 임베딩: 최종 wiki/*.md만 대상으로 하며 아래 목표/최대/중첩 청크 설정을 \
+                적용합니다. 파일별 실제 색인 여부는 현재 전처리 해시와 SQLite 해시를 비교합니다.
+                """);
+        explanation.setWrapText(true);
+        explanation.getStyleClass().add("text-muted");
+
+        Button inspect = new Button("선택 디렉토리 색인 상태 확인");
+        inspect.setOnAction(e -> new WikiIndexStatusDialog(stage).showAndWait());
+        HBox action = new HBox(inspect);
+        action.setAlignment(Pos.CENTER_LEFT);
+        return new VBox(8, title, explanation, action);
     }
 
     private int addPluginField(Stage stage, GridPane grid, int row, String pluginId,
@@ -420,7 +446,31 @@ public class SettingsDialog {
         }
         savers.add(() -> {
             if (!field.isSecret()) {
-                settings.setPluginSetting(pluginId, field.getKey(), textField.getText().trim());
+                String value = textField.getText().trim();
+                settings.setPluginSetting(pluginId, field.getKey(), value);
+                // wiki 기본 워크스페이스 저장 시 골격이 없으면 즉석 초기화 제안
+                if ("wiki-agent".equals(pluginId) && "wiki.defaultCwd".equals(field.getKey())
+                        && !value.isBlank()) {
+                    Path wsPath = Path.of(value).toAbsolutePath().normalize();
+                    if (!org.kyj.llmmanager.service.WikiWorkspaceInitializer.isInitialized(wsPath)) {
+                        Alert initAlert = new Alert(Alert.AlertType.CONFIRMATION,
+                                "raw/, wiki/, graph/ 골격을 지금 생성할까요?\n" + wsPath,
+                                ButtonType.YES, ButtonType.NO);
+                        initAlert.initOwner(stage);
+                        initAlert.setTitle("위키 골격 초기화");
+                        initAlert.setHeaderText("선택한 디렉토리에 위키 골격(wiki/index.md)이 없습니다.");
+                        initAlert.showAndWait().ifPresent(btn -> {
+                            if (btn != ButtonType.YES) return;
+                            try {
+                                org.kyj.llmmanager.service.WikiWorkspaceInitializer.initialize(wsPath);
+                            } catch (Exception ex) {
+                                new Alert(Alert.AlertType.ERROR,
+                                        "골격 초기화 실패: " + ex.getMessage(),
+                                        ButtonType.OK).showAndWait();
+                            }
+                        });
+                    }
+                }
             }
         });
         addGridSection(grid, row, label + suffix, textField, browse);

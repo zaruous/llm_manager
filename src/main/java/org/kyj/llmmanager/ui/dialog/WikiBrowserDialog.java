@@ -94,6 +94,7 @@ public class WikiBrowserDialog {
     /** 뒤로 가기 스택 — 현재 표시 중인 페이지 경로를 push한다. */
     private final Deque<Path> backStack = new ArrayDeque<>();
 
+    private Stage stage;
     private Path workspace;
     private Path currentPage;
     private WebView webView;
@@ -113,7 +114,7 @@ public class WikiBrowserDialog {
     }
 
     public void show() {
-        Stage stage = new Stage();
+        stage = new Stage();
         stage.initOwner(owner);
         stage.initModality(Modality.NONE);
         stage.setTitle("위키 브라우저");
@@ -255,8 +256,10 @@ public class WikiBrowserDialog {
         Path wikiDir = workspace.resolve("wiki");
         if (!Files.isRegularFile(wikiDir.resolve("index.md"))) {
             treeView.setRoot(root);
-            renderMessage("위키 워크스페이스가 아닙니다 (wiki/index.md 없음): " + workspace);
-            return;
+            if (!offerInitialize(workspace)) {
+                renderMessage("위키 워크스페이스가 아닙니다 (wiki/index.md 없음): " + workspace);
+                return;
+            }
         }
         // 유효한 워크스페이스는 기억해 다음에 모든 위키 다이얼로그의 기본값으로 복원
         org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
@@ -549,6 +552,30 @@ public class WikiBrowserDialog {
                 java.awt.Desktop.getDesktop().browse(java.net.URI.create(uri));
             }
         } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * wiki/index.md가 없을 때 골격 초기화를 제안하고 수락 시 생성한다.
+     *
+     * @param workspace 초기화할 워크스페이스 경로
+     * @return 초기화 성공 여부 (취소 또는 실패 시 false)
+     */
+    private boolean offerInitialize(Path workspace) {
+        javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
+                javafx.scene.control.Alert.AlertType.CONFIRMATION);
+        alert.initOwner(stage);
+        alert.setTitle("위키 골격 초기화");
+        alert.setHeaderText("이 디렉토리에 위키 골격(wiki/index.md)이 없습니다.");
+        alert.setContentText("raw/, wiki/, graph/ 골격을 지금 생성할까요?\n" + workspace);
+        var result = alert.showAndWait();
+        if (result.isEmpty() || result.get() != javafx.scene.control.ButtonType.OK) return false;
+        try {
+            org.kyj.llmmanager.service.WikiWorkspaceInitializer.initialize(workspace);
+            return true;
+        } catch (Exception ex) {
+            renderMessage("[오류] 골격 초기화 실패: " + ex.getMessage());
+            return false;
         }
     }
 

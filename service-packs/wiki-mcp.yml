@@ -25,7 +25,19 @@ argSpecs:
     label: 쓰기 도구(wiki_ingest) 허용
     type: BOOLEAN
     defaultValue: "false"
-    description: "외부 에이전트가 위키를 수정할 수 있도록 허용 (기본 비활성)"
+    description: "외부 에이전트가 입력한 내용을 Cursor Agent로 위키에 수집하도록 허용 (기본 비활성)"
+  - name: cursor-model
+    flag: --cursor-model
+    label: Ingest Cursor 모델
+    type: STRING
+    defaultValue: ""
+    description: "비우면 Cursor Agent Runner 플러그인의 기본 모델 설정을 사용"
+  - name: cursor-timeout
+    flag: --cursor-timeout
+    label: Ingest 제한 시간(초)
+    type: NUMBER
+    defaultValue: "-1"
+    description: "-1이면 Wiki Agent 플러그인의 timeoutMinutes 설정, 0이면 무제한"
   - name: workspace
     flag: --workspace
     label: 위키 워크스페이스 경로
@@ -59,18 +71,36 @@ groovyScript: |
 
   def installDirFile = new File(service.installDir)
   def serverFile = new File(pluginDir, 'server.py')
+  def pluginConfig = new File(pluginDir, 'plugin.json')
+  def agentsMd = new File(pluginDir, 'AGENTS.md')
   def toolsDir = new File(pluginDir, 'tools')
+  def cursorSidecar = new File(new File(new File(pluginDir.parentFile, 'cursor-agent-runner'), 'sidecar'), 'cursor-agent-sidecar.js')
+  def installedSidecar = new File(installDirFile, 'cursor-agent-sidecar.js')
+  def installedPluginConfig = new File(installDirFile, 'plugin.json')
+  def installedAgentsMd = new File(installDirFile, 'AGENTS.md')
+  def enableWrite = 'true'.equalsIgnoreCase(service.argValues?.get('enable-write'))
+  if (enableWrite) {
+    service.startCommand = service.startCommand +
+      ' --cursor-sidecar "' + installedSidecar.absolutePath + '"' +
+      ' --plugin-config "' + installedPluginConfig.absolutePath + '"'
+  }
 
   if (os == 'windows') {
     def psq = { s -> "'" + s.replace("'", "''") + "'" }
-    def copyCommand = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType Directory -Force -Path ${psq(installDirFile.absolutePath)} | Out-Null; Copy-Item -LiteralPath ${psq(serverFile.absolutePath)} -Destination ${psq(new File(installDirFile, 'server.py').absolutePath)} -Force; Copy-Item -LiteralPath ${psq(toolsDir.absolutePath)} -Destination ${psq(installDirFile.absolutePath)} -Recurse -Force\""
+    def writeFilesCopy = enableWrite
+      ? "; Copy-Item -LiteralPath ${psq(cursorSidecar.absolutePath)} -Destination ${psq(installedSidecar.absolutePath)} -Force; Copy-Item -LiteralPath ${psq(pluginConfig.absolutePath)} -Destination ${psq(installedPluginConfig.absolutePath)} -Force"
+      : ""
+    def copyCommand = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType Directory -Force -Path ${psq(installDirFile.absolutePath)} | Out-Null; Copy-Item -LiteralPath ${psq(serverFile.absolutePath)} -Destination ${psq(new File(installDirFile, 'server.py').absolutePath)} -Force; Copy-Item -LiteralPath ${psq(agentsMd.absolutePath)} -Destination ${psq(installedAgentsMd.absolutePath)} -Force; Copy-Item -LiteralPath ${psq(toolsDir.absolutePath)} -Destination ${psq(installDirFile.absolutePath)} -Recurse -Force${writeFilesCopy}\""
     service.installCommands = [
       copyCommand.toString(),
       "pip install \"fastmcp>=2.0.0\""
     ]
   } else {
     def shQuote = { s -> "'" + s.replace("'", "'\"'\"'") + "'" }
-    def copyCommand = "mkdir -p ${shQuote(new File(installDirFile, 'tools').absolutePath)} && cp -f ${shQuote(serverFile.absolutePath)} ${shQuote(new File(installDirFile, 'server.py').absolutePath)} && cp -R ${shQuote(new File(toolsDir, '.').absolutePath)} ${shQuote(new File(installDirFile, 'tools').absolutePath)}"
+    def writeFilesCopy = enableWrite
+      ? " && cp -f ${shQuote(cursorSidecar.absolutePath)} ${shQuote(installedSidecar.absolutePath)} && cp -f ${shQuote(pluginConfig.absolutePath)} ${shQuote(installedPluginConfig.absolutePath)}"
+      : ""
+    def copyCommand = "mkdir -p ${shQuote(new File(installDirFile, 'tools').absolutePath)} && cp -f ${shQuote(serverFile.absolutePath)} ${shQuote(new File(installDirFile, 'server.py').absolutePath)} && cp -f ${shQuote(agentsMd.absolutePath)} ${shQuote(installedAgentsMd.absolutePath)} && cp -R ${shQuote(new File(toolsDir, '.').absolutePath)} ${shQuote(new File(installDirFile, 'tools').absolutePath)}${writeFilesCopy}"
     service.installCommands = [
       copyCommand.toString(),
       "pip install 'fastmcp>=2.0.0'"
