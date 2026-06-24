@@ -77,6 +77,54 @@ LLMManager/
 | `arch` | `"x86_64"` 등 |
 | `env(name)` | 환경변수 조회 클로저 |
 
+## 설정 아키텍처
+
+### 설정 3계층
+
+| 계층 | 저장 위치 | 역할 |
+|------|-----------|------|
+| 전역 앱 설정 | `AppSettings` 필드 (`~/llm-services/settings.json`) | 앱 전체 기본값 (모델명, API 키 등) |
+| 플러그인 전역 설정 | `AppSettings.pluginSettings[pluginId][key]` | 플러그인 기본값 — **서비스 신규 등록 시 초기값 주입에만 사용** |
+| 서비스 인스턴스 설정 | `ServiceDefinition.argValues` (`~/llm-services/services.json`) | 서비스별 단일 진실 원천 — 등록 후에는 여기만 갱신 |
+
+### 원칙
+
+**1. 플러그인 전역 설정은 생성 시 기본값 전용**
+
+`BuiltinServiceSetupController.setup()`이 서비스 등록 화면을 열 때 `pluginSettings`에서 초기값을 읽어 `argValues`에 주입한다. 등록 완료 후에는 `ServiceDefinition.argValues`가 단일 정보 원천이며, 플러그인 전역 설정을 다시 읽지 않는다.
+
+```
+신규 등록 시:  pluginSettings["wiki.defaultCwd"]  →  argValues["workspace"]  (초기값 복사)
+등록 이후:     argValues["workspace"]  (단일 원천, 서비스마다 독립)
+```
+
+**2. 서비스 인스턴스 식별 — `ServiceDefinition.packId`**
+
+- YAML 템플릿 def: `id="wiki-mcp"`, `packId=null`
+- 등록된 인스턴스: `id=UUID`, `packId="wiki-mcp"`
+- `packId`는 `buildDefinition()`에서 `sourceDef.getId()`를 복사해 설정한다
+
+**3. 플러그인-서비스 1:1 연동 — `linkedServiceType` / `linkedServiceId`**
+
+- `plugin.json` 최상위 `linkedServiceType` 필드로 연동할 서비스 팩을 선언한다 (예: `"wiki-mcp"`)
+- `PluginManager.getCommands(ServiceRegistry)`는 해당 `packId` 서비스가 **정확히 1개**일 때만 `PluginCommandContribution.linkedServiceId`를 채운다
+- 0개 또는 2개 이상이면 `linkedServiceId=null` — 다이얼로그는 플러그인 전역 설정으로 폴백한다
+
+**4. `resolveWorkspace()` 결정 순서**
+
+위키 다이얼로그(`WikiQueryDialog`, `WikiIngestDialog`, `WikiBrowserDialog`)는 항상 아래 순서로 워크스페이스를 결정한다:
+
+```
+1. contribution.linkedServiceId() != null
+       → serviceRegistry.findById(id).argValues["workspace"]
+2. (linkedServiceId == null)
+       → pluginSettings[contribution.pluginId()]["wiki.defaultCwd"]
+```
+
+`contribution`이 null이면 빈 문자열을 반환한다.
+
+---
+
 ## 빌드 상태
 
 `./gradlew build` 정상 통과 (2026-06-25 기준).
@@ -113,6 +161,19 @@ LLMManager/
   `PluginCommandExecutor.cancel(commandId)` → `destroyProcessTree()`로 자식까지 종료.
   워크스페이스 선택은 `wiki.defaultCwd`에 자동 영속화(`WikiWorkspaceInitializer.rememberWorkspace`).
   사이드카 env 화이트리스트에 APPDATA 필수 — 없으면 `npm root -g`가 깨져 글로벌 SDK 탐색 실패
+
+### 위키 서비스별 워크스페이스 설정 (2026-06-24, claude/tag-build-failure-cwh073)
+
+전역 `wiki.defaultCwd` → 서비스 인스턴스별 `argValues["workspace"]` 아키텍처 전환.
+
+- **`ServiceDefinition.packId`**: 원본 서비스 팩 id 추적 필드 추가 (`buildDefinition()`에서 주입)
+- **`PluginManifest.linkedServiceType`**: 플러그인이 연동하는 서비스 팩 선언 (`plugin.json` 최상위)
+- **`ServiceRegistry.findById()` / `findByPackId()`**: 서비스 조회 헬퍼 추가
+- **`PluginManager.getCommands(ServiceRegistry)`**: `linkedServiceId` 해석 오버로드 추가
+- **`WikiWorkspaceInitializer.rememberWorkspace(ServiceRegistry, ...)`**: 서비스 argValues 갱신 오버로드
+- **`BuiltinServiceSetupController`**: wiki-mcp 등록 화면에서 `wiki.defaultCwd` → `argValues["workspace"]` 초기값 주입
+- **위키 다이얼로그 3종**: `resolveWorkspace()` 추가 — linkedServiceId → argValues → 전역 설정 순서로 결정
+- **`plugin.json`**: `"linkedServiceType": "wiki-mcp"` 추가, `wiki.defaultCwd` 설명 갱신
 
 ### Wiki Vector MCP + 버그 수정 (2026-06-25, feature/wiki-vector-mcp)
 
