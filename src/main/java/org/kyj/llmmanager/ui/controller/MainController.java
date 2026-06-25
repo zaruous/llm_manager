@@ -1040,7 +1040,7 @@ public class MainController implements Initializable {
     private void rebuildPluginMenu() {
         List<PluginManager.PluginCommandContribution> commands =
                 ctx != null && ctx.getPluginManager() != null
-                        ? ctx.getPluginManager().getCommands() : List.of();
+                        ? ctx.getPluginManager().getCommands(ctx.getServiceRegistry()) : List.of();
 
         // getCommands()가 플러그인명 순으로 정렬해 반환하므로 LinkedHashMap으로 순서 유지
         Map<String, List<PluginManager.PluginCommandContribution>> byPlugin = new LinkedHashMap<>();
@@ -1090,7 +1090,7 @@ public class MainController implements Initializable {
         } else if ("wiki.browse".equals(c.command().getId())) {
             // 위키 브라우저는 트리 + 마크다운 뷰 전용 창으로 실행
             item.setOnAction(e -> new WikiBrowserDialog(
-                    (Stage) menuBar.getScene().getWindow()).show());
+                    (Stage) menuBar.getScene().getWindow(), c).show());
         } else {
             item.setOnAction(e -> new PluginCommandRunDialog((Stage) menuBar.getScene().getWindow())
                     .show(c.command().getId()));

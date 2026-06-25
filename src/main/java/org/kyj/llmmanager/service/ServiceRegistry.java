@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 사용자가 추가한 서비스 정의 목록을 ~/llm-services/services.json 에 영속 저장·로드한다.
@@ -100,5 +101,30 @@ public class ServiceRegistry {
      */
     public void update(ServiceDefinition def) {
         add(def);
+    }
+
+    /**
+     * id로 서비스 정의를 찾는다.
+     *
+     * @param id 서비스 UUID
+     * @return 서비스 정의 (없으면 empty)
+     */
+    public Optional<ServiceDefinition> findById(String id) {
+        if (id == null || id.isBlank()) return Optional.empty();
+        return definitions.stream().filter(d -> id.equals(d.getId())).findFirst();
+    }
+
+    /**
+     * packId가 일치하는 서비스 정의 목록을 반환한다.
+     * 같은 팩으로 여러 서비스를 등록한 경우 모두 반환된다.
+     *
+     * @param packId 서비스 팩 원본 id (예: "wiki-mcp")
+     * @return 일치하는 서비스 정의 목록 (없으면 빈 목록)
+     */
+    public List<ServiceDefinition> findByPackId(String packId) {
+        if (packId == null || packId.isBlank()) return List.of();
+        return definitions.stream()
+                .filter(d -> packId.equals(d.getPackId()))
+                .toList();
     }
 }
