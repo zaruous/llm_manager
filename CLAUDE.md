@@ -79,7 +79,10 @@ LLMManager/
 
 ## 빌드 상태
 
-`./gradlew build` 정상 통과 (2026-06-25 기준).
+`./gradlew build` 정상 통과 (2026-07-01 기준).
+
+- 커밋 누락으로 유실됐던 `WikiPreprocessor`·`WikiIndexStatusDialog` 재작성 복원 (2026-07-01).
+  `WikiPreprocessor`는 `WikiChunkerTest` 20개 테스트 명세 기준으로 동작을 복원했다.
 
 - `BuiltinServiceLoader` 제거 → `ServicePackLoader`로 일원화
 - `service-packs/` 디렉토리: `bgem3-embedding.yml`, `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`
