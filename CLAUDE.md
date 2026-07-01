@@ -82,7 +82,8 @@ LLMManager/
 `./gradlew build` 정상 통과 (2026-06-25 기준).
 
 - `BuiltinServiceLoader` 제거 → `ServicePackLoader`로 일원화
-- `service-packs/` 디렉토리: `bgem3-embedding.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`
+- `service-packs/` 디렉토리: `bgem3-embedding.yml`, `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`
+- `chroma-db.yml`: ChromaDB 벡터 DB 템플릿 — 기본 포트 18000 (swagger-mcp·sql-gen-mcp의 chroma.url 기본값과 일치), `pip install chromadb` 자동 설치, 헬스체크 `/api/v2/heartbeat`
 - `bgem3-embedding.yml`: CUDA 자동 감지(CUDA_PATH + nvcc), install-type/cuda-version argSpec 추가
 - 서비스 목록 우클릭 컨텍스트 메뉴에 "제거" 기능 추가
 - HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 의존성으로 `LlmSkillLibraryRepository` 컴파일

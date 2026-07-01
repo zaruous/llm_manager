@@ -39,6 +39,7 @@ public class HelpDialog {
         TOPICS.put("BGE-M3 Embedding Server", "docs/bge-m3.md");
         TOPICS.put("Swagger MCP Server",       "docs/swagger-mcp.md");
         TOPICS.put("SQL Gen MCP Server",       "docs/sql-gen-mcp.md");
+        TOPICS.put("ChromaDB",                 "docs/chroma-db.md");
         TOPICS.put("LLM 스킬 설치",             "docs/llm-skills-install.md");
         TOPICS.put("LLM 스킬 로드",             "docs/llm-skills-load.md");
         TOPICS.put("LLM Wiki Agent",           "docs/wiki-agent.md");

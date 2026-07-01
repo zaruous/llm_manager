@@ -1,0 +1,57 @@
+name: ChromaDB
+description: "ChromaDB 벡터 데이터베이스 서버 — swagger-mcp·sql-gen-mcp의 chroma 벡터 스토어 백엔드"
+runtimeType: PYTHON
+startCommand: "chroma run"
+port: 18000
+healthCheckPath: /api/v2/heartbeat
+installCommands:
+  - "pip install chromadb"
+argSpecs:
+  - name: port
+    flag: "--port"
+    type: INTEGER
+    defaultValue: "18000"
+    description: "서버 포트. swagger-mcp·sql-gen-mcp의 chroma.url 기본값(http://localhost:18000)과 일치"
+    enabled: true
+  - name: host
+    flag: "--host"
+    type: STRING
+    defaultValue: "localhost"
+    description: "바인딩 호스트. Docker 컨테이너 등 외부 접근 허용 시 0.0.0.0"
+    enabled: true
+  - name: path
+    flag: "--path"
+    type: DIRECTORY
+    defaultValue: ""
+    description: "벡터 데이터 저장 경로. 비워두면 <설치경로>/data 로 자동 설정"
+    enabled: true
+  - name: chromadb-version
+    flag: ""
+    type: STRING
+    defaultValue: ""
+    description: "[설치 설정] chromadb 패키지 버전 고정 (예: 1.0.15). 비우면 최신 버전 설치"
+    enabled: false
+groovyScript: |
+  // installDir: INSTALL_BASE 환경변수 우선, 없으면 ~/llm-services/chroma-db
+  service.installDir = env('INSTALL_BASE') ?: (userHome + '/llm-services/chroma-db')
+  service.workingDir = service.installDir
+
+  // 데이터 저장 경로가 비어 있으면 installDir/data 로 기본 설정
+  def dataPath = service.argValues?.get('path')
+  if (dataPath == null || dataPath.isBlank()) {
+      service.argValues['path'] = new File(service.installDir, 'data').absolutePath
+  }
+
+  // 사용자가 포트를 바꾸면 헬스체크 포트(service.port)도 함께 갱신
+  def portVal = service.argValues?.get('port')
+  if (portVal != null && !portVal.isBlank()) {
+      try { service.port = Integer.parseInt(portVal.trim()) } catch (Exception ignored) { }
+  }
+
+  // chromadb-version이 지정되면 해당 버전으로 고정 설치
+  def ver = service.argValues?.get('chromadb-version')
+  if (ver != null && !ver.isBlank()) {
+      service.installCommands = ["pip install chromadb==" + ver.trim()]
+  } else {
+      service.installCommands = ["pip install chromadb"]
+  }
