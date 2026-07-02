@@ -76,6 +76,21 @@ public final class WikiChunker {
         return result;
     }
 
+    /**
+     * 청크 content에서 본문만의 해시를 계산한다.
+     *
+     * WikiPreprocessor가 주입하는 메타데이터 헤더에는 빈 줄이 없으므로
+     * 첫 빈 줄(\n\n) 이후가 본문이다. 빈 줄이 없으면 전체를 본문으로 간주한다.
+     * 헤더 포맷·경로만 바뀐 청크를 재임베딩 없이 재연결하는 판단 기준으로 사용한다.
+     *
+     * @param content 헤더가 포함된 청크 전체 텍스트
+     * @return 본문 텍스트의 SHA-256 앞 16자리
+     */
+    public static String bodyHash(String content) {
+        int boundary = content.indexOf("\n\n");
+        return hash(boundary >= 0 ? content.substring(boundary + 2) : content);
+    }
+
     /** 텍스트의 SHA-256 앞 16자리를 반환한다. */
     private static String hash(String text) {
         try {

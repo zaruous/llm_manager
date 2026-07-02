@@ -313,6 +313,48 @@ class WikiChunkerTest {
         assertTrue(chunks.get(0).content().contains("태그: embedding, vector-search"));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // bodyHash — 헤더 변경과 무관한 본문 해시
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    void bodyHash_stableWhenOnlyHeaderChanges(@TempDir Path dir) throws IOException {
+        Path f = dir.resolve("page.md");
+        Files.writeString(f, "## 섹션\n같은 본문입니다.");
+
+        // 경로(헤더의 "경로:" 라인)만 다르게 두 번 청킹
+        List<WikiChunker.Chunk> a = WikiChunker.chunk(
+                f, "concepts", "wiki/concepts/page.md", WikiPreprocessor.Options.defaults());
+        List<WikiChunker.Chunk> b = WikiChunker.chunk(
+                f, "concepts", "wiki/moved/page.md", WikiPreprocessor.Options.defaults());
+
+        // 전체 해시는 다르지만 본문 해시는 같아야 재연결이 가능하다
+        assertNotEquals(a.get(0).contentHash(), b.get(0).contentHash());
+        assertEquals(WikiChunker.bodyHash(a.get(0).content()),
+                WikiChunker.bodyHash(b.get(0).content()));
+    }
+
+    @Test
+    void bodyHash_changesWhenBodyChanges(@TempDir Path dir) throws IOException {
+        Path f1 = dir.resolve("a.md");
+        Path f2 = dir.resolve("b.md");
+        Files.writeString(f1, "## 섹션\n본문 A");
+        Files.writeString(f2, "## 섹션\n본문 B");
+        List<WikiChunker.Chunk> a = WikiChunker.chunk(f1, "concepts", "wiki/x.md",
+                WikiPreprocessor.Options.defaults());
+        List<WikiChunker.Chunk> b = WikiChunker.chunk(f2, "concepts", "wiki/x.md",
+                WikiPreprocessor.Options.defaults());
+        assertNotEquals(WikiChunker.bodyHash(a.get(0).content()),
+                WikiChunker.bodyHash(b.get(0).content()));
+    }
+
+    @Test
+    void bodyHash_noBlankLine_hashesWholeContent() {
+        // 헤더 없는 레거시 content — 전체를 본문으로 간주
+        String legacy = "헤더 없는 옛 형식 청크";
+        assertEquals(16, WikiChunker.bodyHash(legacy).length());
+    }
+
     @Test
     void codeFence_keptInSingleChunk(@TempDir Path dir) throws IOException {
         Path f = dir.resolve("code.md");

@@ -63,6 +63,9 @@ public class WikiVectorRepository implements Closeable {
     /**
      * 청크를 DB에 upsert한다. 동일 (page_path, chunk_no)이면 교체한다.
      *
+     * INSERT OR REPLACE는 DELETE+INSERT라서 id가 재발급되어 임베딩 rowid 링크가
+     * 끊기고 고아 임베딩이 남으므로, 기존 행은 UPDATE로 id를 보존한다.
+     *
      * @param pagePath    워크스페이스 상대 경로 (예: wiki/entities/JohnDoe.md)
      * @param chunk       청크 메타·내용
      * @param embedding   BGE-M3 1024차원 float 배열
@@ -71,32 +74,40 @@ public class WikiVectorRepository implements Closeable {
     public synchronized void upsertChunk(String pagePath, WikiChunker.Chunk chunk,
                                           float[] embedding) throws SQLException {
         ensureSchema();
-        try (Connection conn = connect();
-             PreparedStatement ps = conn.prepareStatement("""
-                     INSERT OR REPLACE INTO chunks
-                         (page_path, chunk_no, type, tags, content, content_hash)
-                     VALUES (?, ?, ?, ?, ?, ?)
-                     """)) {
-            ps.setString(1, pagePath);
-            ps.setInt(2, chunk.chunkNo());
-            ps.setString(3, chunk.type());
-            ps.setString(4, chunk.tags());
-            ps.setString(5, chunk.content());
-            ps.setString(6, chunk.contentHash());
-            ps.executeUpdate();
-        }
-        // chunk id를 조회해 vec0에 upsert
+        String bodyHash = WikiChunker.bodyHash(chunk.content());
         try (Connection conn = connect()) {
-            long chunkId;
-            try (PreparedStatement ps = conn.prepareStatement("""
-                    SELECT id FROM chunks WHERE page_path = ? AND chunk_no = ?
-                    """)) {
-                ps.setString(1, pagePath);
-                ps.setInt(2, chunk.chunkNo());
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (!rs.next()) return;
-                    chunkId = rs.getLong(1);
+            long chunkId = findChunkId(conn, pagePath, chunk.chunkNo());
+            if (chunkId >= 0) {
+                try (PreparedStatement ps = conn.prepareStatement("""
+                        UPDATE chunks SET type = ?, tags = ?, content = ?,
+                                          content_hash = ?, body_hash = ?
+                        WHERE id = ?
+                        """)) {
+                    ps.setString(1, chunk.type());
+                    ps.setString(2, chunk.tags());
+                    ps.setString(3, chunk.content());
+                    ps.setString(4, chunk.contentHash());
+                    ps.setString(5, bodyHash);
+                    ps.setLong(6, chunkId);
+                    ps.executeUpdate();
                 }
+            } else {
+                try (PreparedStatement ps = conn.prepareStatement("""
+                        INSERT INTO chunks
+                            (page_path, chunk_no, type, tags, content, content_hash, body_hash)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """)) {
+                    ps.setString(1, pagePath);
+                    ps.setInt(2, chunk.chunkNo());
+                    ps.setString(3, chunk.type());
+                    ps.setString(4, chunk.tags());
+                    ps.setString(5, chunk.content());
+                    ps.setString(6, chunk.contentHash());
+                    ps.setString(7, bodyHash);
+                    ps.executeUpdate();
+                }
+                chunkId = findChunkId(conn, pagePath, chunk.chunkNo());
+                if (chunkId < 0) return;
             }
             try (PreparedStatement ps = conn.prepareStatement("""
                     INSERT OR REPLACE INTO chunk_embeddings(rowid, embedding) VALUES (?, ?)
@@ -104,6 +115,18 @@ public class WikiVectorRepository implements Closeable {
                 ps.setLong(1, chunkId);
                 ps.setBytes(2, toBlob(embedding));
                 ps.executeUpdate();
+            }
+        }
+    }
+
+    /** (page_path, chunk_no)의 chunks.id를 반환한다. 없으면 -1. */
+    private long findChunkId(Connection conn, String pagePath, int chunkNo) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT id FROM chunks WHERE page_path = ? AND chunk_no = ?")) {
+            ps.setString(1, pagePath);
+            ps.setInt(2, chunkNo);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : -1L;
             }
         }
     }
@@ -143,6 +166,114 @@ public class WikiVectorRepository implements Closeable {
             }
         }
         return result;
+    }
+
+    /**
+     * 특정 페이지의 청크별 (content_hash, body_hash) 상태를 반환한다.
+     * 재연결 계획(planReconcile) 수립에 사용한다.
+     *
+     * @param pagePath 워크스페이스 상대 경로
+     * @return chunkNo → ChunkState 맵 (chunk_no 순서 보장)
+     */
+    public java.util.Map<Integer, ChunkState> getChunkStates(String pagePath) throws SQLException {
+        ensureSchema();
+        java.util.Map<Integer, ChunkState> result = new java.util.LinkedHashMap<>();
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement("""
+                     SELECT chunk_no, content_hash, body_hash
+                     FROM chunks WHERE page_path = ? ORDER BY chunk_no
+                     """)) {
+            ps.setString(1, pagePath);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.put(rs.getInt(1), new ChunkState(rs.getString(2), rs.getString(3)));
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 본문이 같은 기존 청크들을 임베딩 재계산 없이 새 내용·위치로 재연결한다.
+     *
+     * chunks 행을 UPDATE해 id를 보존하므로 chunk_embeddings(rowid) 링크가 유지된다.
+     * UNIQUE(page_path, chunk_no) 제약과의 일시 충돌을 피하기 위해
+     * 임시 음수 번호로 옮긴 뒤 확정하는 2-pass를 한 트랜잭션으로 실행한다.
+     *
+     * @param pagePath 워크스페이스 상대 경로
+     * @param relinks  oldChunkNo → 새 청크 매핑 목록
+     */
+    public synchronized void relinkChunks(String pagePath, List<Relink> relinks)
+            throws SQLException {
+        if (relinks.isEmpty()) return;
+        ensureSchema();
+        try (Connection conn = connect()) {
+            boolean autoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            try {
+                // pass 1: 임시 음수 번호(-(newNo+1))로 이동하며 내용·해시 갱신
+                try (PreparedStatement ps = conn.prepareStatement("""
+                        UPDATE chunks SET chunk_no = ?, type = ?, tags = ?, content = ?,
+                                          content_hash = ?, body_hash = ?
+                        WHERE page_path = ? AND chunk_no = ?
+                        """)) {
+                    for (Relink relink : relinks) {
+                        WikiChunker.Chunk chunk = relink.chunk();
+                        ps.setInt(1, -(chunk.chunkNo() + 1));
+                        ps.setString(2, chunk.type());
+                        ps.setString(3, chunk.tags());
+                        ps.setString(4, chunk.content());
+                        ps.setString(5, chunk.contentHash());
+                        ps.setString(6, WikiChunker.bodyHash(chunk.content()));
+                        ps.setString(7, pagePath);
+                        ps.setInt(8, relink.oldChunkNo());
+                        ps.executeUpdate();
+                    }
+                }
+                // pass 2: 임시 번호를 최종 chunk_no로 확정
+                try (PreparedStatement ps = conn.prepareStatement("""
+                        UPDATE chunks SET chunk_no = ? WHERE page_path = ? AND chunk_no = ?
+                        """)) {
+                    for (Relink relink : relinks) {
+                        int newNo = relink.chunk().chunkNo();
+                        ps.setInt(1, newNo);
+                        ps.setString(2, pagePath);
+                        ps.setInt(3, -(newNo + 1));
+                        ps.executeUpdate();
+                    }
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(autoCommit);
+            }
+        }
+    }
+
+    /**
+     * 특정 청크 한 건과 그 임베딩을 삭제한다.
+     *
+     * @param pagePath 워크스페이스 상대 경로
+     * @param chunkNo  삭제할 청크 번호
+     */
+    public synchronized void deleteChunk(String pagePath, int chunkNo) throws SQLException {
+        ensureSchema();
+        try (Connection conn = connect()) {
+            long id = findChunkId(conn, pagePath, chunkNo);
+            if (id < 0) return;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM chunk_embeddings WHERE rowid = ?")) {
+                ps.setLong(1, id);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM chunks WHERE id = ?")) {
+                ps.setLong(1, id);
+                ps.executeUpdate();
+            }
+        }
     }
 
     /**
@@ -265,9 +396,11 @@ public class WikiVectorRepository implements Closeable {
                             tags         TEXT,
                             content      TEXT NOT NULL,
                             content_hash TEXT NOT NULL,
+                            body_hash    TEXT,
                             UNIQUE(page_path, chunk_no)
                         )
                         """);
+                migrateBodyHash(conn, st);
                 st.executeUpdate("""
                         CREATE INDEX IF NOT EXISTS idx_chunks_page_path
                         ON chunks(page_path)
@@ -290,6 +423,43 @@ public class WikiVectorRepository implements Closeable {
             }
         }
         schemaReady.set(true);
+    }
+
+    /**
+     * 기존 DB에 body_hash 컬럼이 없으면 추가하고 저장된 content에서 백필한다.
+     * 헤더 포맷만 바뀐 재색인에서 기존 임베딩을 재연결할 수 있게 하는 1회성 마이그레이션.
+     */
+    private void migrateBodyHash(Connection conn, Statement st) throws SQLException {
+        boolean hasColumn = false;
+        try (ResultSet rs = st.executeQuery("PRAGMA table_info(chunks)")) {
+            while (rs.next()) {
+                if ("body_hash".equalsIgnoreCase(rs.getString("name"))) {
+                    hasColumn = true;
+                    break;
+                }
+            }
+        }
+        if (!hasColumn) {
+            st.executeUpdate("ALTER TABLE chunks ADD COLUMN body_hash TEXT");
+        }
+
+        // 컬럼이 방금 추가됐거나 백필이 중단됐던 행을 채운다
+        try (Statement sel = conn.createStatement();
+             ResultSet rs = sel.executeQuery(
+                     "SELECT id, content FROM chunks WHERE body_hash IS NULL");
+             PreparedStatement upd = conn.prepareStatement(
+                     "UPDATE chunks SET body_hash = ? WHERE id = ?")) {
+            int backfilled = 0;
+            while (rs.next()) {
+                upd.setString(1, WikiChunker.bodyHash(rs.getString(2)));
+                upd.setLong(2, rs.getLong(1));
+                upd.executeUpdate();
+                backfilled++;
+            }
+            if (backfilled > 0) {
+                log.info("wiki-vector: body_hash 백필 완료 — {}행", backfilled);
+            }
+        }
     }
 
     /**
@@ -459,4 +629,20 @@ public class WikiVectorRepository implements Closeable {
      */
     public record SearchResult(String pagePath, int chunkNo, String type,
                                String content, float distance) {}
+
+    /**
+     * 색인된 청크 한 건의 변경 감지 상태.
+     *
+     * @param contentHash 헤더 포함 전체 텍스트 해시 (완전 일치 스킵 판단)
+     * @param bodyHash    본문만의 해시 (임베딩 재사용/재연결 판단). 레거시 행은 null 가능.
+     */
+    public record ChunkState(String contentHash, String bodyHash) {}
+
+    /**
+     * 재연결 한 건: 기존 행(oldChunkNo)을 새 청크의 번호·내용으로 옮긴다.
+     *
+     * @param oldChunkNo 재사용할 기존 행의 청크 번호
+     * @param chunk      새 위치·내용의 청크 (임베딩은 기존 것 유지)
+     */
+    public record Relink(int oldChunkNo, WikiChunker.Chunk chunk) {}
 }

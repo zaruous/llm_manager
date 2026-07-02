@@ -48,11 +48,12 @@ public class WikiIndexService implements Closeable {
      * @param workspace      색인한 워크스페이스 경로
      * @param indexedChunks  새로 색인된 청크 수
      * @param skippedChunks  변경 없어 건너뛴 청크 수
+     * @param relinkedChunks 본문 동일로 임베딩을 재사용해 재연결한 청크 수
      * @param deletedPages   삭제된 페이지 수
      * @param errorPages     오류가 발생한 페이지 수
      */
     public record IndexResult(Path workspace, int indexedChunks, int skippedChunks,
-                              int deletedPages, int errorPages) {}
+                              int relinkedChunks, int deletedPages, int errorPages) {}
 
     /**
      * 현재 Wiki 파일과 SQLite 색인의 비교 상태.
@@ -114,7 +115,7 @@ public class WikiIndexService implements Closeable {
             progress.accept("[wiki-index] 임베딩 서버에 연결할 수 없습니다 (" +
                     embeddingClient(embeddingUrl()) + "). bgem3-embedding 서비스를 먼저 시작해 주세요.");
             log.warn("wiki-index: 임베딩 서버 미기동 — 색인 건너뜀");
-            return new IndexResult(workspace, 0, 0, 0, 0);
+            return new IndexResult(workspace, 0, 0, 0, 0, 0);
         }
 
         WikiVectorRepository repo = getRepo(workspace);
@@ -129,14 +130,15 @@ public class WikiIndexService implements Closeable {
             currentPagePaths.add(relativize(workspace, page.file()));
         }
 
-        int indexed = 0, skipped = 0, deleted = 0, errors = 0;
+        int indexed = 0, skipped = 0, relinked = 0, deleted = 0, errors = 0;
 
         for (WikiMarkdownUtils.PageEntry page : pages) {
             String relPath = relativize(workspace, page.file());
             try {
                 int[] counts = indexPage(relPath, page, repo, embeddingClient, progress);
-                indexed += counts[0];
-                skipped += counts[1];
+                indexed  += counts[0];
+                skipped  += counts[1];
+                relinked += counts[2];
             } catch (Exception e) {
                 log.warn("wiki-index: 페이지 색인 실패 [{}]: {}", relPath, e.getMessage());
                 progress.accept("[wiki-index] 오류: " + relPath + " — " + e.getMessage());
@@ -151,12 +153,13 @@ public class WikiIndexService implements Closeable {
             log.warn("wiki-index: 고아 페이지 정리 실패: {}", e.getMessage());
         }
 
-        log.info("wiki-index: 완료 — 새 청크={}, 건너뜀={}, 삭제 페이지={}, 오류={}",
-                indexed, skipped, deleted, errors);
-        progress.accept(String.format("[wiki-index] 완료: 청크 %d개 색인, %d개 건너뜀, %d개 페이지 삭제",
-                indexed, skipped, deleted));
+        log.info("wiki-index: 완료 — 새 청크={}, 건너뜀={}, 재연결={}, 삭제 페이지={}, 오류={}",
+                indexed, skipped, relinked, deleted, errors);
+        progress.accept(String.format(
+                "[wiki-index] 완료: 청크 %d개 색인, %d개 건너뜀, %d개 재연결, %d개 페이지 삭제",
+                indexed, skipped, relinked, deleted));
 
-        return new IndexResult(workspace, indexed, skipped, deleted, errors);
+        return new IndexResult(workspace, indexed, skipped, relinked, deleted, errors);
     }
 
     /**
@@ -249,9 +252,12 @@ public class WikiIndexService implements Closeable {
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * 페이지 하나를 청킹·임베딩·upsert한다.
+     * 페이지 하나를 청킹한 뒤 재연결 계획에 따라 색인한다.
      *
-     * @return int[]{indexed, skipped}
+     * 본문(body_hash)이 같은 청크는 헤더·위치가 바뀌어도 기존 임베딩을 재사용해
+     * 재연결하고, 본문이 실제로 바뀐 청크만 임베딩 API를 호출한다.
+     *
+     * @return int[]{indexed, skipped, relinked}
      */
     private int[] indexPage(String relPath, WikiMarkdownUtils.PageEntry page,
                             WikiVectorRepository repo,
@@ -268,39 +274,115 @@ public class WikiIndexService implements Closeable {
         List<WikiChunker.Chunk> chunks = WikiChunker.chunk(document);
         if (chunks.isEmpty()) {
             repo.deleteChunksFrom(relPath, 0);
-            return new int[]{0, 0};
+            return new int[]{0, 0, 0};
         }
 
-        Map<Integer, String> existingHashes = repo.getChunkHashes(relPath);
+        ReconcilePlan plan = planReconcile(repo.getChunkStates(relPath), chunks);
 
-        // 변경된 청크만 선별
-        List<WikiChunker.Chunk> toEmbed = new ArrayList<>();
+        // 순서 중요: 삭제로 자리를 비운 뒤 재연결(번호 이동)하고, 마지막에 신규 삽입
+        for (int chunkNo : plan.deletes()) {
+            repo.deleteChunk(relPath, chunkNo);
+        }
+        repo.relinkChunks(relPath, plan.relinks());
+
+        if (!plan.toEmbed().isEmpty()) {
+            // 배치 임베딩 — 본문이 실제로 바뀐 청크만 호출
+            List<String> texts = plan.toEmbed().stream().map(WikiChunker.Chunk::content).toList();
+            List<float[]> embeddings = client.embedBatch(texts);
+            for (int i = 0; i < plan.toEmbed().size(); i++) {
+                repo.upsertChunk(relPath, plan.toEmbed().get(i), embeddings.get(i));
+            }
+        }
+
+        if (!plan.toEmbed().isEmpty() || !plan.relinks().isEmpty()) {
+            progress.accept("[wiki-index] " + relPath + " — " + plan.toEmbed().size()
+                    + "청크 색인, " + plan.relinks().size() + "청크 재연결");
+        }
+        return new int[]{plan.toEmbed().size(), plan.skipped(), plan.relinks().size()};
+    }
+
+    /**
+     * 페이지 재색인 실행 계획.
+     *
+     * @param skipped 완전 일치(content_hash 동일)로 아무 작업도 필요 없는 청크 수
+     * @param relinks 본문 동일 — 기존 임베딩을 유지한 채 내용·위치만 갱신할 목록
+     * @param toEmbed 본문 변경 — 임베딩을 새로 계산해야 하는 청크 목록
+     * @param deletes 새 청크 어디에도 대응되지 않아 삭제할 기존 chunk_no 목록
+     */
+    record ReconcilePlan(int skipped, List<WikiVectorRepository.Relink> relinks,
+                         List<WikiChunker.Chunk> toEmbed, List<Integer> deletes) {}
+
+    /**
+     * 기존 색인 상태와 새 청크 목록을 비교해 재색인 계획을 세운다.
+     *
+     * <p>매칭 우선순위:
+     * <ol>
+     *   <li>같은 위치 + content_hash 일치 → 스킵</li>
+     *   <li>같은 위치 + body_hash 일치 → 제자리 재연결 (헤더만 변경)</li>
+     *   <li>다른 위치의 미사용 행과 body_hash 일치 → 이동 재연결 (문단 삽입/재배열)</li>
+     *   <li>매칭 없음 → 재임베딩</li>
+     * </ol>
+     * 어느 새 청크와도 매칭되지 않은 기존 행은 삭제 대상이 된다.
+     * body_hash가 null인 레거시 행은 재연결 후보에서 제외된다.
+     *
+     * @param existing DB의 chunkNo → ChunkState
+     * @param chunks   현재 전처리 결과 청크 목록
+     * @return 재색인 실행 계획
+     */
+    static ReconcilePlan planReconcile(Map<Integer, WikiVectorRepository.ChunkState> existing,
+                                       List<WikiChunker.Chunk> chunks) {
         int skipped = 0;
+        List<WikiVectorRepository.Relink> relinks = new ArrayList<>();
+        List<WikiChunker.Chunk> toEmbed = new ArrayList<>();
+        Set<Integer> consumed = new java.util.HashSet<>();
+        List<WikiChunker.Chunk> unresolved = new ArrayList<>();
+
+        // 1차: 같은 위치 매칭
         for (WikiChunker.Chunk chunk : chunks) {
-            String existing = existingHashes.get(chunk.chunkNo());
-            if (chunk.contentHash().equals(existing)) {
+            WikiVectorRepository.ChunkState state = existing.get(chunk.chunkNo());
+            if (state == null) {
+                unresolved.add(chunk);
+                continue;
+            }
+            if (chunk.contentHash().equals(state.contentHash())) {
+                consumed.add(chunk.chunkNo());
                 skipped++;
+            } else if (state.bodyHash() != null
+                    && state.bodyHash().equals(WikiChunker.bodyHash(chunk.content()))) {
+                consumed.add(chunk.chunkNo());
+                relinks.add(new WikiVectorRepository.Relink(chunk.chunkNo(), chunk));
+            } else {
+                unresolved.add(chunk);
+            }
+        }
+
+        // 2차: 이동 매칭 — 남은 기존 행을 body_hash로 색인해 위치가 바뀐 본문을 찾는다
+        Map<String, java.util.ArrayDeque<Integer>> byBodyHash = new java.util.HashMap<>();
+        for (Map.Entry<Integer, WikiVectorRepository.ChunkState> e : existing.entrySet()) {
+            if (consumed.contains(e.getKey()) || e.getValue().bodyHash() == null) continue;
+            byBodyHash.computeIfAbsent(e.getValue().bodyHash(),
+                    k -> new java.util.ArrayDeque<>()).add(e.getKey());
+        }
+        for (WikiChunker.Chunk chunk : unresolved) {
+            java.util.ArrayDeque<Integer> candidates =
+                    byBodyHash.get(WikiChunker.bodyHash(chunk.content()));
+            if (candidates != null && !candidates.isEmpty()) {
+                int oldNo = candidates.poll();
+                consumed.add(oldNo);
+                relinks.add(new WikiVectorRepository.Relink(oldNo, chunk));
             } else {
                 toEmbed.add(chunk);
             }
         }
 
-        if (toEmbed.isEmpty()) {
-            repo.deleteChunksFrom(relPath, chunks.size());
-            return new int[]{0, skipped};
+        // 어느 새 청크에도 대응되지 않은 기존 행은 삭제
+        List<Integer> deletes = new ArrayList<>();
+        for (Integer oldNo : existing.keySet()) {
+            if (!consumed.contains(oldNo)) deletes.add(oldNo);
         }
 
-        // 배치 임베딩
-        List<String> texts = toEmbed.stream().map(WikiChunker.Chunk::content).toList();
-        List<float[]> embeddings = client.embedBatch(texts);
-
-        for (int i = 0; i < toEmbed.size(); i++) {
-            repo.upsertChunk(relPath, toEmbed.get(i), embeddings.get(i));
-        }
-        repo.deleteChunksFrom(relPath, chunks.size());
-
-        progress.accept("[wiki-index] " + relPath + " — " + toEmbed.size() + "청크 색인");
-        return new int[]{toEmbed.size(), skipped};
+        return new ReconcilePlan(skipped, List.copyOf(relinks),
+                List.copyOf(toEmbed), List.copyOf(deletes));
     }
 
     /**
