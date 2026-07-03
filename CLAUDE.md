@@ -79,10 +79,22 @@ LLMManager/
 
 ## 빌드 상태
 
-`./gradlew build` 정상 통과 (2026-06-25 기준).
+`./gradlew build` 정상 통과 (2026-07-01 기준).
+
+- 커밋 누락으로 유실됐던 `WikiPreprocessor`·`WikiIndexStatusDialog` 재작성 복원 (2026-07-01).
+  `WikiPreprocessor`는 `WikiChunkerTest` 20개 테스트 명세 기준으로 동작을 복원했다.
+- 임베딩 재연결(body_hash) 도입 (2026-07-01): `chunks.body_hash` 컬럼(자동 마이그레이션+백필).
+  변경 감지를 content_hash(헤더 포함)와 body_hash(본문만)로 이원화 —
+  헤더 포맷·경로 변경, 문단 삽입/재배열은 임베딩 API 호출 없이 기존 벡터를 재연결한다.
+  `WikiIndexService.planReconcile()`이 스킵/재연결/재임베딩/삭제 계획을 수립하고,
+  `WikiVectorRepository.relinkChunks()`가 임시 음수 chunk_no 2-pass 트랜잭션으로
+  UNIQUE 제약 충돌 없이 번호를 이동한다 (UPDATE 기반이라 chunks.id·임베딩 rowid 보존).
+  upsertChunk도 UPDATE-first로 변경해 REPLACE로 인한 id 재발급·고아 임베딩을 방지.
+  재연결된 청크의 벡터는 옛 헤더 기준(드리프트 감수) — 본문이 바뀌는 다음 편집에서 자연 갱신.
 
 - `BuiltinServiceLoader` 제거 → `ServicePackLoader`로 일원화
-- `service-packs/` 디렉토리: `bgem3-embedding.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`
+- `service-packs/` 디렉토리: `bgem3-embedding.yml`, `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`
+- `chroma-db.yml`: ChromaDB 벡터 DB 템플릿 — 기본 포트 18000 (swagger-mcp·sql-gen-mcp의 chroma.url 기본값과 일치), `pip install chromadb` 자동 설치, 헬스체크 `/api/v2/heartbeat`
 - `bgem3-embedding.yml`: CUDA 자동 감지(CUDA_PATH + nvcc), install-type/cuda-version argSpec 추가
 - 서비스 목록 우클릭 컨텍스트 메뉴에 "제거" 기능 추가
 - HikariCP 5.1.0 + sqlite-jdbc 3.45.2.0 의존성으로 `LlmSkillLibraryRepository` 컴파일

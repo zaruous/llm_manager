@@ -241,6 +241,139 @@ class WikiVectorRepositoryTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // body_hash — 상태 조회·재연결·마이그레이션
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    void getChunkStates_returnsContentAndBodyHash(@TempDir Path workspace) throws SQLException {
+        try (WikiVectorRepository repo = new WikiVectorRepository(workspace, "")) {
+            WikiChunker.Chunk chunk = new WikiChunker.Chunk(
+                    0, "entity", "", "제목: A\n\n본문입니다.", "abc123def456abcd");
+            repo.upsertChunk("wiki/A.md", chunk, unitVec(4));
+
+            Map<Integer, WikiVectorRepository.ChunkState> states =
+                    repo.getChunkStates("wiki/A.md");
+            assertEquals(1, states.size());
+            assertEquals("abc123def456abcd", states.get(0).contentHash());
+            assertEquals(WikiChunker.bodyHash(chunk.content()), states.get(0).bodyHash());
+        }
+    }
+
+    @Test
+    void upsertChunk_replacePreservesEmbeddingLink(@TempDir Path workspace) throws SQLException {
+        try (WikiVectorRepository repo = new WikiVectorRepository(workspace, "")) {
+            float[] emb = normalize(new float[]{1f, 0f, 0f, 0f});
+            repo.upsertChunk("wiki/A.md",
+                    new WikiChunker.Chunk(0, "entity", "", "v1 내용", "hash1111aaaabbbb"), emb);
+            repo.upsertChunk("wiki/A.md",
+                    new WikiChunker.Chunk(0, "entity", "", "v2 내용", "hash2222ccccdddd"), emb);
+
+            // 교체 후에도 임베딩-청크 조인이 정확히 1건이어야 한다 (고아 임베딩 없음)
+            List<WikiVectorRepository.SearchResult> results = repo.searchSimilar(emb, 10);
+            assertEquals(1, results.size());
+            assertEquals("v2 내용", results.get(0).content());
+        }
+    }
+
+    @Test
+    void relinkChunks_movesRowsKeepingEmbeddings(@TempDir Path workspace) throws SQLException {
+        try (WikiVectorRepository repo = new WikiVectorRepository(workspace, "")) {
+            // 본문 A(0번)·B(1번)를 서로 다른 벡터로 색인
+            float[] embA = normalize(new float[]{1f, 0f, 0f, 0f});
+            float[] embB = normalize(new float[]{0f, 1f, 0f, 0f});
+            repo.upsertChunk("wiki/P.md",
+                    new WikiChunker.Chunk(0, "entity", "", "헤더\n\n본문 A", "hashaaaa00000000"), embA);
+            repo.upsertChunk("wiki/P.md",
+                    new WikiChunker.Chunk(1, "entity", "", "헤더\n\n본문 B", "hashbbbb00000000"), embB);
+
+            // 문단 삽입 시나리오: A→1번, B→2번으로 이동 (0번은 신규용으로 비움)
+            repo.relinkChunks("wiki/P.md", List.of(
+                    new WikiVectorRepository.Relink(0,
+                            new WikiChunker.Chunk(1, "entity", "", "새헤더\n\n본문 A", "hashaaaa11111111")),
+                    new WikiVectorRepository.Relink(1,
+                            new WikiChunker.Chunk(2, "entity", "", "새헤더\n\n본문 B", "hashbbbb11111111"))));
+
+            Map<Integer, WikiVectorRepository.ChunkState> states = repo.getChunkStates("wiki/P.md");
+            assertEquals(Set.of(1, 2), states.keySet());
+            assertEquals("hashaaaa11111111", states.get(1).contentHash());
+
+            // A 벡터로 검색하면 이동한 1번 청크가 나와야 한다 — 임베딩 링크 유지 증명
+            List<WikiVectorRepository.SearchResult> results = repo.searchSimilar(embA, 1);
+            assertEquals(1, results.get(0).chunkNo());
+            assertEquals("새헤더\n\n본문 A", results.get(0).content());
+        }
+    }
+
+    @Test
+    void relinkChunks_swapPositions_noUniqueConflict(@TempDir Path workspace) throws SQLException {
+        try (WikiVectorRepository repo = new WikiVectorRepository(workspace, "")) {
+            float[] emb = unitVec(4);
+            repo.upsertChunk("wiki/P.md", makeChunk(0, "hash0000aaaaaaaa"), emb);
+            repo.upsertChunk("wiki/P.md", makeChunk(1, "hash1111bbbbbbbb"), emb);
+
+            // 0↔1 맞교환 — 임시 음수 번호 2-pass가 없으면 UNIQUE 제약 위반
+            repo.relinkChunks("wiki/P.md", List.of(
+                    new WikiVectorRepository.Relink(0, makeChunk(1, "hash0000aaaaaaaa")),
+                    new WikiVectorRepository.Relink(1, makeChunk(0, "hash1111bbbbbbbb"))));
+
+            Map<Integer, WikiVectorRepository.ChunkState> states = repo.getChunkStates("wiki/P.md");
+            assertEquals("hash0000aaaaaaaa", states.get(1).contentHash());
+            assertEquals("hash1111bbbbbbbb", states.get(0).contentHash());
+        }
+    }
+
+    @Test
+    void deleteChunk_removesSingleChunkOnly(@TempDir Path workspace) throws SQLException {
+        try (WikiVectorRepository repo = new WikiVectorRepository(workspace, "")) {
+            float[] emb = unitVec(4);
+            repo.upsertChunk("wiki/P.md", makeChunk(0, "hash0000aaaaaaaa"), emb);
+            repo.upsertChunk("wiki/P.md", makeChunk(1, "hash1111bbbbbbbb"), emb);
+
+            repo.deleteChunk("wiki/P.md", 0);
+
+            assertEquals(Set.of(1), repo.getChunkStates("wiki/P.md").keySet());
+            // 임베딩도 함께 삭제되어 검색 결과가 1건이어야 한다
+            assertEquals(1, repo.searchSimilar(emb, 10).size());
+        }
+    }
+
+    @Test
+    void migration_backfillsBodyHashOnLegacyDb(@TempDir Path workspace) throws Exception {
+        // body_hash 컬럼이 없는 구버전 스키마 DB를 직접 만든다
+        Path dbFile = workspace.resolve(".llm-manager").resolve("wiki-vector.sqlite");
+        java.nio.file.Files.createDirectories(dbFile.getParent());
+        String legacyContent = "제목: A\n\n레거시 본문";
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(
+                "jdbc:sqlite:" + dbFile.toAbsolutePath());
+             java.sql.Statement st = conn.createStatement()) {
+            st.executeUpdate("""
+                    CREATE TABLE chunks (
+                        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                        page_path    TEXT NOT NULL,
+                        chunk_no     INTEGER NOT NULL,
+                        type         TEXT,
+                        tags         TEXT,
+                        content      TEXT NOT NULL,
+                        content_hash TEXT NOT NULL,
+                        UNIQUE(page_path, chunk_no)
+                    )
+                    """);
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO chunks(page_path, chunk_no, type, tags, content, content_hash) " +
+                    "VALUES ('wiki/L.md', 0, 'entity', '', ?, 'legacyhash000000')")) {
+                ps.setString(1, legacyContent);
+                ps.executeUpdate();
+            }
+        }
+
+        // 리포지토리를 열면 ALTER + 백필 마이그레이션이 실행된다
+        try (WikiVectorRepository repo = new WikiVectorRepository(workspace, "")) {
+            Map<Integer, WikiVectorRepository.ChunkState> states = repo.getChunkStates("wiki/L.md");
+            assertEquals(WikiChunker.bodyHash(legacyContent), states.get(0).bodyHash());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // 헬퍼
     // ─────────────────────────────────────────────────────────────
 
