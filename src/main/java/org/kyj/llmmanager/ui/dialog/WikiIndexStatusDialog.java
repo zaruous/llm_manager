@@ -1,18 +1,27 @@
 /*
  * 작성자 : kyj
- * 작성일 : 2026-06-25
+ * 작성일 : 2026-06-24
  */
 package org.kyj.llmmanager.ui.dialog;
 
 import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.AppSettings;
-import org.kyj.llmmanager.service.WikiVectorRepository;
+import org.kyj.llmmanager.service.WikiIndexService;
+import org.kyj.llmmanager.service.WikiIndexService.PageIndexState;
+import org.kyj.llmmanager.service.WikiIndexService.WorkspaceIndexMetadata;
 import org.kyj.llmmanager.util.SceneFactory;
-import javafx.beans.property.ReadOnlyObjectWrapper;
-import javafx.beans.property.ReadOnlyStringWrapper;
+
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.control.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
+import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -23,156 +32,218 @@ import javafx.stage.Stage;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Set;
+import java.sql.SQLException;
+import java.util.List;
 
 /**
- * 워크스페이스의 위키 벡터 색인 상태를 조회하는 다이얼로그.
+ * 위키 워크스페이스의 벡터 색인 상태를 페이지별로 조회하는 다이얼로그.
  *
- * 선택 디렉토리의 {@code .llm-manager/wiki-vector.sqlite}를 읽어
- * 색인된 페이지 목록과 페이지별 청크 수, 전체 요약을 표시한다.
- * 조회 전용이며 색인을 변경하지 않는다.
+ * 설정 탭 하단 "선택 디렉토리 색인 상태 확인" 버튼에서 열린다.
+ * WikiIndexService.inspectWorkspace()를 호출해 CURRENT/STALE/NOT_INDEXED/ORPHANED
+ * 상태를 테이블로 표시한다.
  */
 public class WikiIndexStatusDialog {
 
-    /** 색인 DB 파일의 워크스페이스 상대 경로. WikiVectorRepository와 동일해야 한다. */
-    private static final String DB_RELATIVE_PATH = ".llm-manager/wiki-vector.sqlite";
-
     private final Stage owner;
 
-    /** 페이지 한 건의 색인 상태 행. */
-    public record PageRow(String pagePath, int chunkCount) {}
-
     /**
-     * @param owner 오너 Stage
+     * @param owner 부모 Stage (모달 기준)
      */
     public WikiIndexStatusDialog(Stage owner) {
         this.owner = owner;
     }
 
-    /** 다이얼로그를 표시하고 닫힐 때까지 대기한다. */
+    /**
+     * 색인 상태 다이얼로그를 열고 닫힐 때까지 대기한다.
+     */
     public void showAndWait() {
         Stage stage = new Stage();
-        stage.setTitle("위키 색인 상태");
+        stage.initOwner(owner);
+        stage.initModality(Modality.APPLICATION_MODAL);
+        stage.setTitle("Wiki 색인 상태 확인");
 
-        // ── 워크스페이스 선택 행 ─────────────────────────────────
-        TextField dirField = new TextField(defaultWorkspace());
-        dirField.setPromptText("위키 워크스페이스 디렉토리");
-        HBox.setHgrow(dirField, Priority.ALWAYS);
+        // 워크스페이스 경로 필드
+        AppSettings settings = AppContext.getInstance().getAppSettingsRepository().get();
+        String defaultCwd = settings.getPluginSetting("wiki-agent", "wiki.defaultCwd", "");
 
-        Button browseBtn = new Button("찾아보기...");
+        TextField pathField = new TextField(defaultCwd);
+        pathField.setPromptText("위키 워크스페이스 경로");
+        HBox.setHgrow(pathField, Priority.ALWAYS);
+
+        Button browseBtn = new Button("찾기");
         browseBtn.setOnAction(e -> {
-            DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle("위키 워크스페이스 선택");
-            File current = new File(dirField.getText().trim());
-            if (current.isDirectory()) chooser.setInitialDirectory(current);
-            File dir = chooser.showDialog(stage);
-            if (dir != null) dirField.setText(dir.getAbsolutePath());
+            DirectoryChooser dc = new DirectoryChooser();
+            dc.setTitle("워크스페이스 선택");
+            String cur = pathField.getText().trim();
+            if (!cur.isBlank()) {
+                File f = new File(cur);
+                if (f.isDirectory()) dc.setInitialDirectory(f);
+            }
+            File sel = dc.showDialog(stage);
+            if (sel != null) pathField.setText(sel.getAbsolutePath());
         });
 
-        Button loadBtn = new Button("조회");
-        HBox dirRow = new HBox(8, dirField, browseBtn, loadBtn);
-        dirRow.setAlignment(Pos.CENTER_LEFT);
+        Button inspectBtn = new Button("색인 상태 조회");
+        inspectBtn.setDefaultButton(true);
+        HBox topRow = new HBox(6, pathField, browseBtn, inspectBtn);
+        topRow.setAlignment(Pos.CENTER_LEFT);
 
-        // ── 결과 테이블 ─────────────────────────────────────────
-        TableView<PageRow> table = new TableView<>();
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("조회 버튼을 눌러 색인 상태를 확인하세요."));
+        // 요약 레이블
+        Label summaryLabel = new Label("워크스페이스를 선택한 뒤 '색인 상태 조회'를 누르세요.");
+        summaryLabel.getStyleClass().add("text-muted");
 
-        TableColumn<PageRow, String> pathCol = new TableColumn<>("페이지 경로");
-        pathCol.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().pagePath()));
-        pathCol.setPrefWidth(420);
-
-        TableColumn<PageRow, Integer> countCol = new TableColumn<>("청크 수");
-        countCol.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(c.getValue().chunkCount()));
-        countCol.setPrefWidth(90);
-        countCol.setStyle("-fx-alignment: CENTER-RIGHT;");
-
-        table.getColumns().add(pathCol);
-        table.getColumns().add(countCol);
+        // 결과 테이블
+        TableView<RowItem> table = buildTable();
+        table.setPrefHeight(340);
         VBox.setVgrow(table, Priority.ALWAYS);
 
-        Label summary = new Label("");
-        summary.getStyleClass().add("text-muted");
+        // 진행 표시
+        ProgressIndicator spinner = new ProgressIndicator();
+        spinner.setMaxSize(32, 32);
+        spinner.setVisible(false);
 
-        loadBtn.setOnAction(e -> loadStatus(dirField.getText().trim(), table, summary, stage));
-
-        Button closeBtn = new Button("닫기");
-        closeBtn.setOnAction(e -> stage.close());
-        HBox bottom = new HBox(summary, spacer(), closeBtn);
-        bottom.setAlignment(Pos.CENTER_LEFT);
-
-        VBox root = new VBox(10, dirRow, table, bottom);
+        VBox root = new VBox(10, topRow, summaryLabel, spinner, table);
         root.setPadding(new Insets(14));
+        VBox.setVgrow(table, Priority.ALWAYS);
 
-        stage.initOwner(owner);
-        stage.initModality(Modality.WINDOW_MODAL);
-        stage.setScene(SceneFactory.create(root, 620, 440));
+        inspectBtn.setOnAction(e -> {
+            String dir = pathField.getText().trim();
+            if (dir.isBlank()) {
+                summaryLabel.setText("워크스페이스 경로를 입력하세요.");
+                return;
+            }
+            Path workspace = Path.of(dir);
+            if (!Files.isDirectory(workspace)) {
+                summaryLabel.setText("유효하지 않은 디렉토리: " + dir);
+                return;
+            }
+            inspectBtn.setDisable(true);
+            spinner.setVisible(true);
+            summaryLabel.setText("조회 중...");
+            table.getItems().clear();
+
+            Thread worker = new Thread(() -> {
+                try {
+                    WikiIndexService svc = AppContext.getInstance().getWikiIndexService();
+                    WorkspaceIndexMetadata meta = svc.inspectWorkspace(workspace);
+                    List<RowItem> rows = meta.pages().stream()
+                            .map(RowItem::from)
+                            .toList();
+                    String summary = buildSummary(meta);
+                    Platform.runLater(() -> {
+                        table.getItems().setAll(rows);
+                        summaryLabel.setText(summary);
+                        spinner.setVisible(false);
+                        inspectBtn.setDisable(false);
+                    });
+                } catch (SQLException ex) {
+                    Platform.runLater(() -> {
+                        summaryLabel.setText("조회 실패: " + ex.getMessage());
+                        spinner.setVisible(false);
+                        inspectBtn.setDisable(false);
+                    });
+                }
+            }, "wiki-inspect");
+            worker.setDaemon(true);
+            worker.start();
+        });
+
+        stage.setScene(SceneFactory.create(root, 700, 480));
         stage.showAndWait();
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // 내부 구현
+    // ─────────────────────────────────────────────────────────────
+
+    private static TableView<RowItem> buildTable() {
+        TableView<RowItem> table = new TableView<>();
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+
+        TableColumn<RowItem, String> pathCol = new TableColumn<>("페이지 경로");
+        pathCol.setCellValueFactory(new PropertyValueFactory<>("pagePath"));
+        pathCol.setPrefWidth(280);
+
+        TableColumn<RowItem, String> catCol = new TableColumn<>("분류");
+        catCol.setCellValueFactory(new PropertyValueFactory<>("category"));
+        catCol.setPrefWidth(80);
+
+        TableColumn<RowItem, String> stateCol = new TableColumn<>("상태");
+        stateCol.setCellValueFactory(new PropertyValueFactory<>("stateLabel"));
+        stateCol.setPrefWidth(100);
+
+        TableColumn<RowItem, String> chunkCol = new TableColumn<>("청크(예상/색인)");
+        chunkCol.setCellValueFactory(new PropertyValueFactory<>("chunkInfo"));
+        chunkCol.setPrefWidth(110);
+
+        TableColumn<RowItem, String> sizeCol = new TableColumn<>("파일 크기");
+        sizeCol.setCellValueFactory(new PropertyValueFactory<>("fileSize"));
+        sizeCol.setPrefWidth(80);
+
+        table.getColumns().addAll(pathCol, catCol, stateCol, chunkCol, sizeCol);
+        return table;
+    }
+
+    private static String buildSummary(WorkspaceIndexMetadata meta) {
+        long current    = meta.count(PageIndexState.CURRENT);
+        long stale      = meta.count(PageIndexState.STALE);
+        long notIndexed = meta.count(PageIndexState.NOT_INDEXED);
+        long orphaned   = meta.count(PageIndexState.ORPHANED);
+        long empty      = meta.count(PageIndexState.EMPTY);
+        return String.format("총 %d 페이지 — 최신: %d, 갱신 필요: %d, 미색인: %d, 빈 파일: %d, 고아: %d",
+                meta.pages().size(), current, stale, notIndexed, empty, orphaned);
+    }
+
     /**
-     * 선택 디렉토리의 색인 DB를 읽어 테이블과 요약 레이블을 갱신한다.
-     * DB 파일이 없으면 색인 없음을 안내하고 DB를 생성하지 않는다.
+     * 테이블 행 데이터 모델.
+     * JavaFX PropertyValueFactory가 getter 이름으로 바인딩하므로 public getter 필수.
      */
-    private void loadStatus(String workspaceText, TableView<PageRow> table,
-                            Label summary, Stage stage) {
-        table.getItems().clear();
-        summary.setText("");
+    public static final class RowItem {
 
-        if (workspaceText.isBlank()) {
-            alert(stage, "워크스페이스 디렉토리를 선택하세요.");
-            return;
+        /** 워크스페이스 기준 페이지 상대 경로 */
+        private final String pagePath;
+        /** 페이지 분류 (sources/entities 등) */
+        private final String category;
+        /** 상태 한글 표시 */
+        private final String stateLabel;
+        /** 예상 청크 수 / 색인된 청크 수 */
+        private final String chunkInfo;
+        /** 파일 크기 (사람이 읽기 쉬운 형식) */
+        private final String fileSize;
+
+        private RowItem(String pagePath, String category, String stateLabel,
+                        String chunkInfo, String fileSize) {
+            this.pagePath   = pagePath;
+            this.category   = category;
+            this.stateLabel = stateLabel;
+            this.chunkInfo  = chunkInfo;
+            this.fileSize   = fileSize;
         }
-        Path workspace = Path.of(workspaceText);
-        if (!Files.isDirectory(workspace)) {
-            alert(stage, "디렉토리가 존재하지 않습니다:\n" + workspace);
-            return;
+
+        /** WikiIndexService.PageIndexMetadata에서 RowItem을 생성한다. */
+        public static RowItem from(WikiIndexService.PageIndexMetadata m) {
+            String label = switch (m.state()) {
+                case CURRENT     -> "최신";
+                case STALE       -> "갱신 필요";
+                case NOT_INDEXED -> "미색인";
+                case EMPTY       -> "빈 파일";
+                case ORPHANED    -> "고아(삭제됨)";
+            };
+            String info = m.expectedChunks() + " / " + m.indexedChunks();
+            String size = m.fileBytes() == 0 ? "-" : formatBytes(m.fileBytes());
+            return new RowItem(m.pagePath(), m.category(), label, info, size);
         }
 
-        Path dbFile = workspace.resolve(DB_RELATIVE_PATH);
-        // 존재 확인을 먼저 해 조회만으로 빈 DB가 생성되는 부작용을 막는다
-        if (!Files.isRegularFile(dbFile)) {
-            table.setPlaceholder(new Label("색인 DB가 없습니다. 아직 색인이 실행되지 않은 워크스페이스입니다."));
-            summary.setText("색인 없음 — " + dbFile);
-            return;
+        public String getPagePath()   { return pagePath; }
+        public String getCategory()   { return category; }
+        public String getStateLabel() { return stateLabel; }
+        public String getChunkInfo()  { return chunkInfo; }
+        public String getFileSize()   { return fileSize; }
+
+        private static String formatBytes(long bytes) {
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+            return String.format("%.1f MB", bytes / (1024.0 * 1024));
         }
-
-        try (WikiVectorRepository repo = new WikiVectorRepository(workspace, vec0Path())) {
-            Set<String> pages = repo.getIndexedPagePaths();
-            long totalChunks = repo.countChunks();
-            for (String page : pages) {
-                table.getItems().add(new PageRow(page, repo.getChunkHashes(page).size()));
-            }
-            summary.setText("페이지 " + pages.size() + "개 · 청크 " + totalChunks + "개 색인됨");
-            if (pages.isEmpty()) {
-                table.setPlaceholder(new Label("색인 DB는 있으나 색인된 페이지가 없습니다."));
-            }
-        } catch (Exception ex) {
-            alert(stage, "색인 상태 조회 실패:\n" + ex.getMessage());
-        }
-    }
-
-    /** 설정에 저장된 기본 워크스페이스(wiki.defaultCwd)를 반환한다. 없으면 빈 문자열. */
-    private String defaultWorkspace() {
-        AppSettings settings = AppContext.getInstance().getAppSettingsRepository().get();
-        return settings.getPluginSetting("wiki-agent", "wiki.defaultCwd", "");
-    }
-
-    /** 설정에 저장된 vec0 라이브러리 경로(wiki.vec0Path)를 반환한다. 없으면 빈 문자열. */
-    private String vec0Path() {
-        AppSettings settings = AppContext.getInstance().getAppSettingsRepository().get();
-        return settings.getPluginSetting("wiki-agent", "wiki.vec0Path", "");
-    }
-
-    private static javafx.scene.layout.Region spacer() {
-        javafx.scene.layout.Region region = new javafx.scene.layout.Region();
-        HBox.setHgrow(region, Priority.ALWAYS);
-        return region;
-    }
-
-    private void alert(Stage stage, String message) {
-        Alert alert = new Alert(Alert.AlertType.WARNING, message, ButtonType.OK);
-        alert.initOwner(stage);
-        alert.showAndWait();
     }
 }
