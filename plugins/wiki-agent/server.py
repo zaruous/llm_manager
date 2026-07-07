@@ -511,7 +511,9 @@ def _extract_wikilinks(content: str) -> list[str]:
     """[[Page]], [[Page#Heading]], [[Page|Alias]] 형태의 위키링크 대상명을 추출한다."""
     links = []
     for raw in re.findall(r"\[\[([^\]]+)\]\]", content):
-        target = raw.split("|", 1)[0].split("#", 1)[0].strip()
+        # Markdown tables often escape Obsidian alias pipes as \| inside wikilinks.
+        target = re.split(r"\\+\||(?<!\\)\|", raw, maxsplit=1)[0]
+        target = target.split("#", 1)[0].strip().replace(r"\|", "|").rstrip("\\").strip()
         if target:
             links.append(target)
     return links
@@ -1052,6 +1054,224 @@ def _format_lint_report(results: dict) -> str:
     return "\n".join(lines)
 
 
+def _rrf_merge(
+    vector_results: list[dict],
+    keyword_results: list[dict],
+    top_k: int = 15,
+    top_p: float = 0.0,
+) -> list[dict]:
+    """벡터 검색 결과와 키워드 검색 결과를 Reciprocal Rank Fusion(RRF) 알고리즘으로 병합한다.
+
+    top_p > 0이면 누적 점수 기반 nucleus filtering을 적용한다.
+    RRF 점수를 정규화하여 확률 분포로 변환한 뒤, 누적 확률이 top_p에
+    도달하면 이후의 저관련성 결과를 제거한다. top_k는 하드 상한으로 유지된다.
+    """
+    rrf_scores = defaultdict(float)
+    k = 60
+    metadata = {}
+
+    for rank, item in enumerate(vector_results, start=1):
+        page = item["page"]
+        rrf_scores[page] += 1.0 / (k + rank)
+        if page not in metadata:
+            metadata[page] = item
+
+    for rank, item in enumerate(keyword_results, start=1):
+        page = item["page"]
+        rrf_scores[page] += 1.0 / (k + rank)
+        if page not in metadata:
+            metadata[page] = item
+
+    sorted_pages = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+
+    # top_k 하드 상한 적용
+    candidates = sorted_pages[:top_k]
+
+    # top_p nucleus filtering 적용
+    if top_p > 0 and candidates:
+        total_score = sum(score for _, score in candidates)
+        if total_score > 0:
+            cumulative = 0.0
+            cutoff_idx = len(candidates)
+            for idx, (_, score) in enumerate(candidates):
+                cumulative += score / total_score
+                if cumulative >= top_p:
+                    cutoff_idx = idx + 1  # 현재 항목까지 포함
+                    break
+            # 최소 1건은 항상 반환
+            candidates = candidates[:max(1, cutoff_idx)]
+
+    merged = []
+    for page, score in candidates:
+        item = metadata[page].copy()
+        item["score"] = score
+        merged.append(item)
+    return merged
+
+
+def _get_node_id(page_path_str: str) -> str:
+    """페이지 경로 문자열에서 지식 그래프 노드 ID 형식(wiki/ 접두사 제거, .md 제거)으로 정규화한다."""
+    p = Path(page_path_str)
+    try:
+        if p.is_absolute():
+            rel = p.relative_to(WIKI_DIR)
+        else:
+            resolved = (WORKSPACE / p).resolve()
+            rel = resolved.relative_to(WIKI_DIR)
+        return rel.as_posix().replace(".md", "")
+    except Exception:
+        clean = page_path_str.replace("\\", "/").lstrip("/")
+        if clean.startswith("wiki/"):
+            clean = clean[5:]
+        if clean.endswith(".md"):
+            clean = clean[:-3]
+        return clean
+
+
+def _find_neighbor_nodes(target_node_ids: list[str], graph_data: dict) -> list[str]:
+    """지식 그래프에서 대상 노드들과 연결되어 있는 이웃 노드 목록을 추출한다."""
+    neighbors = set()
+    targets = set(target_node_ids)
+    for edge in graph_data.get("edges", []):
+        source = edge.get("from")
+        target = edge.get("to")
+        if source in targets and target not in targets:
+            neighbors.add(target)
+        elif target in targets and source not in targets:
+            neighbors.add(source)
+    return list(neighbors)
+
+
+def _get_page_description(node_id: str) -> str:
+    """특정 노드 ID 페이지의 frontmatter에서 desc 값을 추출한다."""
+    page_path = WIKI_DIR / f"{node_id}.md"
+    if not page_path.is_file():
+        return ""
+    content = _read_file(page_path)
+    match = re.search(r"^desc:\s*(.+?)\s*$", content, re.MULTILINE)
+    if match:
+        desc = match.group(1).strip()
+        if len(desc) >= 2 and desc[0] == desc[-1] in ('"', "'"):
+            desc = desc[1:-1]
+        return desc
+    return ""
+
+
+def _wiki_query_logic(question: str, top_k: int = 10, top_p: float = 0.0) -> str:
+    """하이브리드 검색(벡터 + 키워드) 및 지식 그래프 확장을 통해
+    질문에 대한 풍부하고 연결성 높은 지식 컨텍스트를 구성하여 반환한다.
+
+    top_p > 0이면 RRF 병합 후 누적 점수 기반 nucleus filtering으로
+    저관련성 결과를 자동 제거하여 컨텍스트 품질을 높인다.
+    """
+    # 1. 벡터 검색 시도
+    vector_results = []
+    db_file = Path(DB_PATH)
+    if db_file.is_file():
+        try:
+            emb = _embed(question)
+            blob = _floats_to_blob(emb)
+            conn = _get_conn()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT c.page_path, c.chunk_no, c.type, c.content, ce.distance
+                    FROM chunk_embeddings ce
+                    JOIN chunks c ON c.id = ce.rowid
+                    WHERE ce.embedding MATCH ?
+                      AND k = 15
+                    ORDER BY ce.distance
+                    """,
+                    [blob],
+                ).fetchall()
+                vector_results = [
+                    {"page": r[0], "chunk": r[1], "type": r[2], "content": r[3], "score": r[4]}
+                    for r in rows
+                ]
+            finally:
+                conn.close()
+        except Exception:
+            # 벡터 검색 실패 시 키워드 검색으로 커버되도록 무시
+            pass
+
+    # 2. 키워드 검색 수행
+    keyword_results = _keyword_search(question, top_k=15)
+
+    # 3. 하이브리드 RRF 병합 (top_p > 0이면 nucleus filtering 적용)
+    merged_results = _rrf_merge(vector_results, keyword_results, top_k=top_k, top_p=top_p)
+
+    if not merged_results:
+        return "관련 페이지를 찾을 수 없습니다. 위키 내용이 있거나 벡터 색인이 구축되어 있는지 확인해 주세요."
+
+    # 4. 메인 검색 결과 포맷팅
+    context_parts = []
+    for item in merged_results:
+        page_path_str = item["page"]
+        content = item["content"]
+        page_type = item.get("type", "page")
+
+        resolved_file = _resolve_page(page_path_str)
+        desc = ""
+        tags = ""
+        if resolved_file.is_file():
+            file_content = _read_file(resolved_file)
+            desc_match = re.search(r"^desc:\s*(.+?)\s*$", file_content, re.MULTILINE)
+            if desc_match:
+                desc = desc_match.group(1).strip().strip('"').strip("'")
+            tags_match = re.search(r"^tags:\s*\[(.+?)\]\s*$", file_content, re.MULTILINE)
+            if tags_match:
+                tags = tags_match.group(1).strip()
+
+        meta_info = f"Type: {page_type}"
+        if desc:
+            meta_info += f", Description: {desc}"
+        if tags:
+            meta_info += f", Tags: {tags}"
+
+        context_parts.append(
+            f"### [{page_path_str}] ({meta_info})\n{content.strip()}"
+        )
+
+    main_context = "\n\n".join(context_parts)
+
+    # 5. 지식 그래프 기반 연관 문서 정보 확장
+    graph_context = ""
+    graph_data, graph_status = _load_graph_data()
+    if graph_data and graph_data.get("nodes") and graph_data.get("edges"):
+        target_nodes = []
+        for item in merged_results[:5]:
+            node_id = _get_node_id(item["page"])
+            target_nodes.append(node_id)
+
+        neighbors = _find_neighbor_nodes(target_nodes, graph_data)
+
+        neighbor_infos = []
+        for n_id in sorted(neighbors):
+            n_file = WIKI_DIR / f"{n_id}.md"
+            if n_file.is_file():
+                desc = _get_page_description(n_id)
+                meta_type = _page_type(n_file)
+                info = f"- [[{n_id}]] (Type: {meta_type}"
+                if desc:
+                    info += f", Description: {desc}"
+                info += ")"
+                neighbor_infos.append(info)
+
+        if neighbor_infos:
+            graph_context = "\n### 관련 연관 문서 (지식 그래프 연결)\n" + "\n".join(neighbor_infos[:10])
+
+    # 6. 최종 컨텍스트 결과 조립
+    final_report = (
+        f"## 관련 지식 검색 결과 (총 {len(merged_results)}건)\n\n"
+        f"{main_context}"
+    )
+    if graph_context:
+        final_report += "\n\n" + graph_context
+
+    return final_report
+
+
+
 # ─────────────────────────────────────────────────────────────
 # MCP 도구
 # ─────────────────────────────────────────────────────────────
@@ -1147,12 +1367,10 @@ def wiki_overview() -> str:
     return "\n\n".join(parts) if parts else "위키가 비어 있습니다."
 
 
-@mcp.tool()
-def wiki_query(question: str) -> str:
+def _wiki_context(question: str) -> str:
     """
-    위키를 기반으로 질문에 답합니다.
-    wiki_search로 관련 청크를 수집해 컨텍스트로 제공합니다.
-    LLM 호출이 발생하지 않으며, 수집된 관련 청크를 그대로 반환합니다.
+    위키에서 질문과 관련된 청크를 모아 컨텍스트로 반환한다.
+    LLM 호출이 발생하지 않으며, 수집된 관련 청크를 그대로 반환한다.
 
     Args:
         question: 위키에 대한 자연어 질문
@@ -1172,6 +1390,35 @@ def wiki_query(question: str) -> str:
         f"[{c['page']}]\n{c['content']}" for c in chunks
     )
     return f"## 관련 청크 ({len(chunks)}건)\n\n{context}"
+
+
+@mcp.tool()
+def wiki_context(question: str) -> str:
+    """
+    위키에서 질문과 관련된 청크를 모아 컨텍스트로 반환합니다.
+    질문에 대한 참고 근거를 모으는 도구로 사용하세요.
+
+    Args:
+        question: 위키에 대한 자연어 질문
+    """
+    return _wiki_context(question)
+
+
+@mcp.tool()
+def wiki_query(question: str, top_k: int = 10, top_p: float = 0.0) -> str:
+    """
+    위키에서 질문과 관련된 지식을 하이브리드 검색(시맨틱 + 키워드)하고,
+    지식 그래프 상의 연관 문서 요약까지 포함한 종합적인 지식 컨텍스트를 구성하여 반환합니다.
+    클라이언트 LLM의 위키 기반 지식 탐색 및 질문 답변을 위한 첫 참고 도구로 적합합니다.
+
+    Args:
+        question: 위키에 대한 자연어 질문
+        top_k: 반환할 최대 결과 수 (기본 10, 하드 상한)
+        top_p: 누적 점수 기반 동적 컷오프 (0.0이면 비활성, 0.85 권장).
+               RRF 점수를 정규화한 뒤 누적 확률이 이 값에 도달하면
+               이후의 저관련성 결과를 자동 제거합니다.
+    """
+    return _wiki_query_logic(question, top_k=top_k, top_p=top_p)
 
 
 @mcp.tool()
