@@ -780,7 +780,16 @@ public class MainController implements Initializable {
                         + "   →  " + dest + "\n"));
                 Files.copy(jar.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
 
+                // 설정에 등록된 JAR 이름과 실제 설치한 파일명이 다르면(버전 업데이트 등)
+                // startCommand를 설치한 파일명으로 갱신 — 아니면 시작·설치 확인이 옛 이름을 바라본다
+                final String updatedCmd = withJarFileName(def.getStartCommand(), jar.getName());
+
                 Platform.runLater(() -> {
+                    if (updatedCmd != null) {
+                        def.setStartCommand(updatedCmd);
+                        ctx.getServiceRegistry().update(def);
+                        installLogArea.appendText("시작 명령어 갱신: " + updatedCmd + "\n");
+                    }
                     installLogArea.appendText("설치 완료.\n");
                     progressBar.setProgress(1.0);
                     installBtn.setDisable(true);
@@ -831,6 +840,29 @@ public class MainController implements Initializable {
                 File bundled = Path.of("lib", jarName).toFile();
                 if (bundled.exists()) return bundled;
                 break;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * startCommand의 {@code -jar} 다음 토큰을 실제 설치한 JAR 파일명으로 교체한 명령어를 반환한다.
+     * 설치 시 선택한 JAR이 설정에 등록된 파일명과 다를 때(버전 업데이트 등) 사용한다.
+     *
+     * @param startCommand 원본 시작 명령어
+     * @param jarFileName  교체할 JAR 파일명
+     * @return 교체된 명령어. -jar 토큰이 없거나 이미 같은 파일명이면 null(변경 불필요).
+     */
+    private String withJarFileName(String startCommand, String jarFileName) {
+        if (startCommand == null || startCommand.isBlank()) return null;
+        List<String> tokens = new ArrayList<>(CommandBuilder.splitCommand(startCommand));
+        for (int i = 0; i < tokens.size() - 1; i++) {
+            if ("-jar".equalsIgnoreCase(tokens.get(i))) {
+                if (jarFileName.equals(tokens.get(i + 1))) return null;
+                // 공백 포함 파일명은 다시 토큰화될 때 깨지지 않도록 따옴표 처리
+                tokens.set(i + 1, jarFileName.contains(" ")
+                        ? "\"" + jarFileName + "\"" : jarFileName);
+                return String.join(" ", tokens);
             }
         }
         return null;
@@ -955,6 +987,9 @@ public class MainController implements Initializable {
                     // 직접 입력: 빈 폼 열기
                 } else if (ctrl.getSelected() != null) {
                     prefill = ctrl.getSelected();
+                    // 같은 팩을 중복 등록할 때 기존 서비스와 설치 경로가 겹치지 않도록
+                    // 기본 installDir에 -2, -3… 접미사를 붙인다 (JAR·PID 파일 충돌 방지)
+                    ensureUniqueInstallDir(prefill);
                 } else {
                     return; // 취소
                 }
@@ -971,6 +1006,44 @@ public class MainController implements Initializable {
             serviceListView.getSelectionModel().selectLast();
             updateStatusBar();
         });
+    }
+
+    /**
+     * 등록된 서비스들과 설치 경로가 겹치면 def의 installDir에 -2, -3… 접미사를 붙여
+     * 유일한 기본 경로를 제안한다. 같은 팩을 두 번 등록할 때 두 서비스가 동일 디렉토리를
+     * 공유하면 JAR 교체·디렉토리 삭제(제거)·PID 파일이 서로 충돌하기 때문이다.
+     * 사용자는 설정 다이얼로그에서 제안된 경로를 자유롭게 바꿀 수 있다.
+     *
+     * @param def 설치 경로를 조정할 서비스 정의 (installDir이 비어 있으면 무시)
+     */
+    private void ensureUniqueInstallDir(ServiceDefinition def) {
+        String raw = def.getInstallDir();
+        if (raw == null || raw.isBlank()) return;
+
+        java.util.Set<Path> used = new java.util.HashSet<>();
+        for (ServiceDefinition d : ctx.getServiceRegistry().getAll()) {
+            if (d.getInstallDir() == null || d.getInstallDir().isBlank()) continue;
+            try {
+                used.add(Path.of(PlatformUtil.resolvePath(d.getInstallDir()))
+                        .toAbsolutePath().normalize());
+            } catch (Exception ignored) {}
+        }
+
+        String resolved = PlatformUtil.resolvePath(raw);
+        try {
+            if (!used.contains(Path.of(resolved).toAbsolutePath().normalize())) return;
+
+            // 최대 -99까지 시도 — 사실상 무한하지만 잘못된 경로로 인한 무한루프 방지
+            for (int i = 2; i < 100; i++) {
+                String candidate = resolved + "-" + i;
+                if (!used.contains(Path.of(candidate).toAbsolutePath().normalize())) {
+                    def.setInstallDir(candidate);
+                    return;
+                }
+            }
+        } catch (Exception ignored) {
+            // 경로 파싱 실패 시 원본 유지 (설정 다이얼로그에서 사용자가 수정 가능)
+        }
     }
 
     @FXML
