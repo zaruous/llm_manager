@@ -148,6 +148,9 @@ Codex용 `agents/openai.yaml`은 `allow_implicit_invocation: false`로 설정되
 - **핵심 클래스**: `PluginCommandExecutor.runWikiTool()`(검증·tools 동기화 후
   `runWikiViaCursorAgent()`로 위임), `WikiIngestDialog`, `WikiQueryDialog`,
   `WikiBrowserDialog`, `WikiWorkspaceInitializer`
+- **서비스별 워크스페이스**: wiki-mcp 서비스마다 독립된 워크스페이스를 가질 수 있다.
+  각 다이얼로그는 `contribution.linkedServiceId` → `argValues["workspace"]` → 전역 `wiki.defaultCwd`
+  순서로 워크스페이스를 결정한다. 상세 내용은 [wiki-per-service-workspace](../done/wiki-per-service-workspace.md) 참조
 - **tools/ 동기화**: 플러그인의 업스트림 Python 도구를 매 실행마다 워크스페이스로 복사 —
   그래프 빌드 시 에이전트가 `python tools/build_graph.py`를 활용할 수 있게 함
 - **ingest 작업 계획 실행**: `WikiIngestPlanner.plan()`이 수집 대상을 에이전트 1회 실행

@@ -19,6 +19,7 @@
     "contentMaxBytes": 10485760,
     "stagingDirectory": "raw/mcp-ingest"
   },
+  "linkedServiceType": "wiki-mcp",
   "type": "local",
   "permissions": [
     "filesystem.read",
@@ -124,7 +125,8 @@
                 "key": "wiki.defaultCwd",
                 "label": "기본 워크스페이스",
                 "kind": "directory",
-                "defaultValue": ""
+                "defaultValue": "",
+                "description": "wiki-mcp 서비스 신규 생성 시 workspace 기본값으로 사용됩니다. 서비스 등록 후에는 서비스별로 관리됩니다."
               },
               {
                 "key": "timeoutMinutes",

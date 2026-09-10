@@ -6,6 +6,7 @@ package org.kyj.llmmanager.ui.dialog;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.kyj.llmmanager.AppContext;
+import org.kyj.llmmanager.service.PluginManager.PluginCommandContribution;
 import org.kyj.llmmanager.service.WikiIndexService;
 import org.kyj.llmmanager.service.WikiMarkdownUtils;
 import org.kyj.llmmanager.util.SceneFactory;
@@ -86,6 +87,8 @@ public class WikiBrowserDialog {
             List.of("sources", "entities", "concepts", "syntheses");
 
     private final Stage owner;
+    /** 연결된 플러그인 커맨드 기여 정보. null이면 전역 plugin 설정에서 워크스페이스를 읽는다. */
+    private final PluginCommandContribution contribution;
 
     /** 페이지 키(소문자 정규화된 이름) → 파일 경로. 워크스페이스 스캔 시 재구축. */
     private final Map<String, Path> pageIndex = new LinkedHashMap<>();
@@ -109,8 +112,9 @@ public class WikiBrowserDialog {
         @Override public String toString() { return label; }
     }
 
-    public WikiBrowserDialog(Stage owner) {
+    public WikiBrowserDialog(Stage owner, PluginCommandContribution contribution) {
         this.owner = owner;
+        this.contribution = contribution;
     }
 
     public void show() {
@@ -119,9 +123,7 @@ public class WikiBrowserDialog {
         stage.initModality(Modality.NONE);
         stage.setTitle("위키 브라우저");
 
-        var settings = AppContext.getInstance().getAppSettingsRepository().get();
-        TextField workspaceField = new TextField(
-                settings.getPluginSetting("wiki-agent", "wiki.defaultCwd", ""));
+        TextField workspaceField = new TextField(resolveWorkspace());
         workspaceField.setPromptText("위키 워크스페이스 디렉토리");
         Button browseBtn = new Button("찾기");
         browseBtn.setOnAction(e -> {
@@ -261,9 +263,15 @@ public class WikiBrowserDialog {
                 return;
             }
         }
-        // 유효한 워크스페이스는 기억해 다음에 모든 위키 다이얼로그의 기본값으로 복원
-        org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
-                AppContext.getInstance().getAppSettingsRepository(), workspace.toString());
+        // 유효한 워크스페이스를 기억 — 서비스 연동 시 서비스 argValues, 아니면 전역 plugin 설정 갱신
+        var _ctx = AppContext.getInstance();
+        if (contribution != null && contribution.linkedServiceId() != null) {
+            org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
+                    _ctx.getServiceRegistry(), contribution.linkedServiceId(), workspace.toString());
+        } else {
+            org.kyj.llmmanager.service.WikiWorkspaceInitializer.rememberWorkspace(
+                    _ctx.getAppSettingsRepository(), workspace.toString());
+        }
 
         // 루트 문서
         TreeItem<PageNode> docs = new TreeItem<>(new PageNode("문서", null));
@@ -577,6 +585,26 @@ public class WikiBrowserDialog {
             renderMessage("[오류] 골격 초기화 실패: " + ex.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 워크스페이스 초기값을 결정한다.
+     * linkedServiceId가 있으면 해당 서비스의 argValues["workspace"]를 사용하고,
+     * 없으면 전역 plugin 설정의 wiki.defaultCwd로 폴백한다.
+     *
+     * @return 결정된 워크스페이스 경로 (없으면 빈 문자열)
+     */
+    private String resolveWorkspace() {
+        if (contribution == null) return "";
+        var ctx = AppContext.getInstance();
+        if (contribution.linkedServiceId() != null) {
+            return ctx.getServiceRegistry()
+                    .findById(contribution.linkedServiceId())
+                    .map(def -> def.getArgValues().getOrDefault("workspace", ""))
+                    .orElse("");
+        }
+        return ctx.getAppSettingsRepository()
+                .get().getPluginSetting(contribution.pluginId(), "wiki.defaultCwd", "");
     }
 
     private String readResource(String path) throws Exception {

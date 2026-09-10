@@ -23,6 +23,11 @@ public class PluginManifest {
     private PluginContributes contributes = new PluginContributes();
     /** 수집 허용/제외 패턴 설정. 선언하지 않으면 WikiIngestDialog 기본값 사용. */
     private PluginIngestConfig ingest = new PluginIngestConfig();
+    /**
+     * 이 플러그인과 연동되는 서비스 팩 id (예: "wiki-mcp").
+     * 설정된 경우 해당 팩으로 생성된 서비스 인스턴스와 플러그인 커맨드를 연결한다.
+     */
+    private String linkedServiceType = "";
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -54,5 +59,10 @@ public class PluginManifest {
     public PluginIngestConfig getIngest() { return ingest; }
     public void setIngest(PluginIngestConfig ingest) {
         this.ingest = ingest != null ? ingest : new PluginIngestConfig();
+    }
+
+    public String getLinkedServiceType() { return linkedServiceType; }
+    public void setLinkedServiceType(String linkedServiceType) {
+        this.linkedServiceType = linkedServiceType != null ? linkedServiceType : "";
     }
 }

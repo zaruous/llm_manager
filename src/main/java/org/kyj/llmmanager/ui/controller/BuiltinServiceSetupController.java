@@ -4,6 +4,7 @@
  */
 package org.kyj.llmmanager.ui.controller;
 
+import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.ArgSpec;
 import org.kyj.llmmanager.model.ServiceDefinition;
 import org.kyj.llmmanager.service.ServiceCustomizer;
@@ -75,7 +76,15 @@ public class BuiltinServiceSetupController {
                 : defaultInstallDir(def);
         installDirField.setText(baseDir);
 
-        buildArgSections(def.getArgValues());
+        // wiki-mcp 서비스의 workspace가 미설정이면 전역 wiki.defaultCwd를 기본값으로 주입
+        Map<String, String> effectiveArgValues = def.getArgValues() != null
+                ? new LinkedHashMap<>(def.getArgValues()) : new LinkedHashMap<>();
+        if ("wiki-mcp".equals(def.getId()) && !effectiveArgValues.containsKey("workspace")) {
+            String globalCwd = AppContext.getInstance().getAppSettingsRepository()
+                    .get().getPluginSetting("wiki-agent", "wiki.defaultCwd", "");
+            if (!globalCwd.isBlank()) effectiveArgValues.put("workspace", globalCwd);
+        }
+        buildArgSections(effectiveArgValues);
     }
 
     /**
@@ -358,6 +367,7 @@ public class BuiltinServiceSetupController {
         def.setGroovyScript(sourceDef.getGroovyScript());
         def.setAutoStart(sourceDef.isAutoStart());
         def.setBuiltin(true);
+        def.setPackId(sourceDef.getId());
 
         def.setInstallDir(installDir);
         // Groovy 스크립트가 없으면 installDir을 working dir로 사용
