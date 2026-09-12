@@ -140,6 +140,22 @@ LLMManager/
 
 **배포 주의사항**: jpackage는 번들 JRE에서 `java.exe`를 제거한다. `build.gradle`의 `copyJavaExeToRuntime()`이 빌드 JDK에서 `runtime/bin/`으로 복사한다. WebView 사용 시 `--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED`이 applicationDefaultJvmArgs·startScripts·jpackage 세 곳에 모두 필요하다.
 
+### sql-gen-mcp 중복 등록·JAR 버전 인식 버그 수정 (2026-08-11)
+
+- **PID 파일 서비스별 분리**: `<installDir>/.llm-manager.pid` → `.llm-manager-<serviceId>.pid`.
+  같은 팩을 두 번 등록해 installDir이 겹쳐도 상호 오인 복원·중지 간섭이 없다
+  (구버전 파일명은 읽기 fallback으로만 지원, write/delete 시 정리)
+- **중복 등록 시 설치 경로 자동 분리**: 서비스 추가에서 builtin 선택 시 기존 서비스와
+  installDir이 겹치면 `-2`, `-3`… 접미사를 붙인 경로를 기본값으로 제안 (`ensureUniqueInstallDir`)
+- **JAR 설치 시 startCommand 갱신**: 설치 과정에서 선택한 JAR 파일명이 설정에 등록된
+  이름과 다르면(버전 업데이트) `-jar` 토큰을 실제 파일명으로 교체해 registry에 저장
+  (`MainController.withJarFileName`) — 이전에는 옛 파일명을 바라봐 설치/시작 인식 실패
+- **sql-gen-mcp.yml groovy**: startCommand가 비어 있을 때만 기본 JAR 명령어를 설정.
+  수정(재설정) 다이얼로그에서 스크립트 재실행 시 설치된 JAR 이름을 덮어쓰지 않는다
+
+> 참고: 현재 master는 `WikiPreprocessor`·`WikiIndexStatusDialog` 클래스가 커밋되지 않아
+> 컴파일이 깨져 있다 (wiki-vector-mcp 머지 시 누락 추정). 위 수정 파일들은 스텁으로 별도 컴파일 검증함.
+
 ---
 
 ## 주석 작성 규칙 (Java)

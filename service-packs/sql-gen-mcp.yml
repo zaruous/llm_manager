@@ -175,4 +175,8 @@ groovyScript: |
   // installDir: JAR 파일이 있는 디렉토리 경로를 입력하세요.
   // 예) C:\\Users\\KYJ\\projects\\sql-gen-mcp\\bin
   service.workingDir = service.installDir
-  service.startCommand = 'java -jar sql-gen-mcp-1.0.0-SNAPSHOT.jar'
+  // startCommand는 비어 있을 때만 기본값 지정 — 설치 시 실제 선택한 JAR 파일명으로
+  // 갱신된 명령어를 수정(재설정) 다이얼로그가 덮어쓰지 않도록 한다
+  if (!service.startCommand) {
+      service.startCommand = 'java -jar sql-gen-mcp-1.0.0-SNAPSHOT.jar'
+  }
