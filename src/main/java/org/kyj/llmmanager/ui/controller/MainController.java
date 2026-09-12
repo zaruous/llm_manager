@@ -926,33 +926,56 @@ public class MainController implements Initializable {
             Path installDir = Path.of(def.getInstallDir());
             if (installDir.toFile().exists()) {
                 Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                        "설치 디렉토리를 삭제하시겠습니까?\n" + installDir,
-                        ButtonType.YES, ButtonType.NO);
+                        "서비스를 제거하고 설치 디렉토리를 삭제합니다.\n" + installDir
+                        + "\n\n계속하시겠습니까?",
+                        ButtonType.YES, ButtonType.CANCEL);
                 confirm.setTitle("제거 확인");
-                confirm.showAndWait().ifPresent(btn -> {
-                    if (btn == ButtonType.YES) {
-                        new Thread(() -> {
-                            try {
-                                deleteDirectory(installDir);
-                                Platform.runLater(() -> {
-                                    installLogArea.appendText("삭제 완료: " + installDir + "\n");
-                                    markUninstalled();
-                                });
-                            } catch (Exception e) {
-                                Platform.runLater(() ->
-                                        installLogArea.appendText("삭제 오류: " + e.getMessage() + "\n"));
-                            }
-                        }, "uninstall-" + def.getName()).start();
-                        return;
+
+                if (uninstallChoice(confirm.showAndWait()) == UninstallChoice.ABORT) return;
+
+                new Thread(() -> {
+                    try {
+                        deleteDirectory(installDir);
+                        Platform.runLater(() -> {
+                            installLogArea.appendText("삭제 완료: " + installDir + "\n");
+                            markUninstalled();
+                        });
+                    } catch (Exception e) {
+                        Platform.runLater(() ->
+                                installLogArea.appendText("삭제 오류: " + e.getMessage() + "\n"));
                     }
-                    // 아니오: 파일은 남기고 상태만 변경
-                    markUninstalled();
-                });
+                }, "uninstall-" + def.getName()).start();
                 return;
             }
         }
 
         markUninstalled();
+    }
+
+    /** 제거 확인 창의 응답을 어떻게 처리할지. */
+    enum UninstallChoice {
+        /** 제거하지 않는다 — 취소를 골랐거나 창을 그냥 닫은 경우 */
+        ABORT,
+        /** 설치 디렉토리를 삭제하고 제거한다 */
+        DELETE
+    }
+
+    /**
+     * 제거 확인 창의 응답을 처리 방식으로 변환한다.
+     *
+     * <p>명시적으로 '예'를 고른 경우에만 제거를 진행한다. 예전에는 '아니오'도
+     * 상태만 미설치로 바꿔서, 취소했는데 "제거되었습니다"가 찍히고 설치 버튼이
+     * 열리는 문제가 있었다. 설치 여부는 디스크에서 판정하므로(installDir 존재 여부)
+     * 파일이 남은 채 미설치로 표시하면 화면이 실제와 어긋나고, 목록을 새로 그리면
+     * 다시 설치됨으로 돌아간다.
+     *
+     * @param answer 확인 창의 응답. 창을 닫았으면 비어 있다.
+     * @return 처리 방식
+     */
+    static UninstallChoice uninstallChoice(Optional<ButtonType> answer) {
+        return answer.filter(btn -> btn == ButtonType.YES).isPresent()
+                ? UninstallChoice.DELETE
+                : UninstallChoice.ABORT;
     }
 
     /** 설치 탭 UI를 미설치 상태로 초기화한다. */
