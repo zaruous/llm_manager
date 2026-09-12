@@ -7,8 +7,12 @@ package org.kyj.llmmanager.ui.controller;
 import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.ArgSpec;
 import org.kyj.llmmanager.model.ServiceDefinition;
+import org.kyj.llmmanager.service.GitHubReleaseClient;
+import org.kyj.llmmanager.service.JarDownloader;
 import org.kyj.llmmanager.service.ServiceCustomizer;
+import org.kyj.llmmanager.service.ServicePackLoader;
 import org.kyj.llmmanager.util.PlatformUtil;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.geometry.HPos;
 import javafx.geometry.Insets;
@@ -19,6 +23,8 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 
 import java.io.File;
+import java.nio.file.Path;
+import java.util.concurrent.CancellationException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,10 +44,28 @@ public class BuiltinServiceSetupController {
     @FXML private HBox installDirRow;
     /** 설치 경로 입력 필드 */
     @FXML private TextField installDirField;
+    /** 릴리즈 JAR 다운로드 버튼. downloadUrl이 있는 서비스에서만 보인다. */
+    @FXML private Button downloadBtn;
+    /** 다운로드 진행 표시 행. 다운로드 시작 시에만 보인다. */
+    @FXML private HBox downloadStatusRow;
+    /** 다운로드 진행률 바 */
+    @FXML private ProgressBar downloadProgress;
+    /** 다운로드 상태 메시지 */
+    @FXML private Label downloadStatusLabel;
+    /** 최신 릴리즈 확인 버튼. GitHub 릴리즈 URL인 서비스에서만 보인다. */
+    @FXML private Button checkLatestBtn;
+    /** '최신 확인'으로 찾은 최신 asset. 확인 전이면 null이고, 이때는 설정된 downloadUrl을 받는다. */
+    private GitHubReleaseClient.ReleaseAsset latestAsset;
+    /** 진행 중인 다운로드 취소 버튼 */
+    @FXML private Button cancelDownloadBtn;
+    /** 현재 진행 중인 다운로드의 취소 신호. 진행 중이 아니면 null. */
+    private JarDownloader.Cancellation currentDownload;
     /** 동적으로 인수 섹션이 추가되는 컨테이너 */
     @FXML private VBox mainContent;
 
     private final ServiceCustomizer customizer = new ServiceCustomizer();
+    /** 저장된 정의에 downloadUrl이 없을 때 같은 이름의 팩에서 찾기 위한 로더 */
+    private final ServicePackLoader packLoader = new ServicePackLoader();
 
     /** setup() 호출 시 주입되는 원본 builtin 서비스 정의 */
     private ServiceDefinition sourceDef;
@@ -75,6 +99,21 @@ public class BuiltinServiceSetupController {
                 ? PlatformUtil.resolvePath(def.getInstallDir())
                 : defaultInstallDir(def);
         installDirField.setText(baseDir);
+
+        // 다운로드 URL이 지정된 서비스에서만 '다운로드' 버튼을 보인다
+        String url = packLoader.resolveDownloadUrl(def);
+        boolean downloadable = url != null;
+        downloadBtn.setVisible(downloadable);
+        downloadBtn.setManaged(downloadable);
+        if (downloadable) {
+            downloadBtn.setTooltip(new Tooltip(url));
+        }
+
+        // GitHub 릴리즈 URL일 때만 최신 버전 조회가 가능하다
+        boolean checkable = GitHubReleaseClient.parseOwnerRepo(url) != null;
+        checkLatestBtn.setVisible(checkable);
+        checkLatestBtn.setManaged(checkable);
+        latestAsset = null;
 
         // wiki-mcp 서비스의 workspace가 미설정이면 전역 wiki.defaultCwd를 기본값으로 주입
         Map<String, String> effectiveArgValues = def.getArgValues() != null
@@ -297,6 +336,155 @@ public class BuiltinServiceSetupController {
         lbl.getStyleClass().add("section-title");
         VBox.setMargin(lbl, new Insets(8, 0, 2, 0));
         return lbl;
+    }
+
+    /**
+     * sourceDef의 downloadUrl에서 JAR을 내려받아 현재 입력된 설치 경로에 저장한다.
+     * 설치 탭의 '설치'와 같은 동작이지만, 설정 단계에서 미리 받아 둘 수 있게 한다.
+     */
+    @FXML
+    private void onDownload() {
+        String url = effectiveDownloadUrl();
+        if (url == null || url.isBlank()) return;
+
+        String dir = installDirField.getText();
+        if (dir == null || dir.isBlank()) {
+            new Alert(Alert.AlertType.WARNING, "설치 경로를 먼저 지정해 주세요.", ButtonType.OK)
+                    .showAndWait();
+            return;
+        }
+
+        final JarDownloader.Cancellation cancel = new JarDownloader.Cancellation();
+        currentDownload = cancel;
+
+        downloadBtn.setDisable(true);
+        downloadStatusRow.setVisible(true);
+        downloadStatusRow.setManaged(true);
+        cancelDownloadBtn.setDisable(false);
+        downloadProgress.setProgress(-1);
+        downloadStatusLabel.setText("시작하는 중...");
+
+        final Path targetDir = Path.of(dir.trim());
+        new Thread(() -> {
+            try {
+                Path saved = new JarDownloader().download(url.trim(), targetDir,
+                        new JarDownloader.Progress() {
+                            @Override public void onLog(String message) {
+                                Platform.runLater(() -> downloadStatusLabel.setText(message));
+                            }
+                            @Override public void onProgress(double ratio) {
+                                Platform.runLater(() -> downloadProgress.setProgress(ratio));
+                            }
+                        }, cancel);
+                Platform.runLater(() -> {
+                    downloadStatusLabel.setText("완료: " + saved.getFileName());
+                    finishDownload();
+                });
+            } catch (CancellationException e) {
+                Platform.runLater(() -> {
+                    downloadProgress.setProgress(0);
+                    downloadStatusLabel.setText("취소됨 — 받던 파일은 삭제했습니다.");
+                    finishDownload();
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    downloadProgress.setProgress(0);
+                    downloadStatusLabel.setText("실패: " + e.getMessage());
+                    finishDownload();
+                });
+            }
+        }, "jar-download-" + (sourceDef.getName() == null ? "service" : sourceDef.getName()))
+                .start();
+    }
+
+    /**
+     * downloadUrl이 가리키는 GitHub 레포의 최신 릴리즈를 조회해 화면에 표시하고,
+     * 다운로드 대상을 그 버전으로 바꾼다.
+     *
+     * <p>서비스 정의의 downloadUrl은 특정 태그에 고정돼 있어, 이 버튼을 누르기 전에는
+     * 설정된 버전을 그대로 받는다.
+     */
+    @FXML
+    private void onCheckLatest() {
+        String ownerRepo = GitHubReleaseClient.parseOwnerRepo(configuredDownloadUrl());
+        if (ownerRepo == null) return;
+
+        checkLatestBtn.setDisable(true);
+        downloadStatusRow.setVisible(true);
+        downloadStatusRow.setManaged(true);
+        downloadProgress.setProgress(-1);
+        downloadStatusLabel.setText("최신 릴리즈 확인 중... (" + ownerRepo + ")");
+
+        new Thread(() -> {
+            try {
+                GitHubReleaseClient.ReleaseAsset asset =
+                        new GitHubReleaseClient().fetchLatestJar(ownerRepo);
+                Platform.runLater(() -> {
+                    latestAsset = asset;
+                    downloadProgress.setProgress(0);
+                    String current = fileNameOf(configuredDownloadUrl());
+                    downloadStatusLabel.setText(asset.assetName().equals(current)
+                            ? "최신 버전입니다 — " + asset.describe()
+                            : "최신: " + asset.describe() + "  (현재 설정: " + current + ")");
+                    checkLatestBtn.setDisable(false);
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    downloadProgress.setProgress(0);
+                    downloadStatusLabel.setText("확인 실패: " + e.getMessage());
+                    checkLatestBtn.setDisable(false);
+                });
+            }
+        }, "release-check").start();
+    }
+
+    /**
+     * 실제로 내려받을 URL. '최신 확인'을 눌렀으면 그 버전을, 아니면 설정된 downloadUrl을 쓴다.
+     *
+     * @return 다운로드 URL. 대상이 없으면 null
+     */
+    private String effectiveDownloadUrl() {
+        if (latestAsset != null) return latestAsset.downloadUrl();
+        return configuredDownloadUrl();
+    }
+
+    /**
+     * URL의 마지막 경로 세그먼트(파일명)를 돌려준다. 표시용이므로 검증은 하지 않는다.
+     *
+     * @param url 대상 URL. null 허용
+     * @return 파일명. url이 null이면 "-"
+     */
+    private static String fileNameOf(String url) {
+        if (url == null || url.isBlank()) return "-";
+        String trimmed = url.trim();
+        return trimmed.substring(trimmed.lastIndexOf('/') + 1);
+    }
+    /**
+     * 서비스 정의에 설정된 다운로드 URL.
+     *
+     * @return downloadUrl. 없으면 null
+     */
+    private String configuredDownloadUrl() {
+        return packLoader.resolveDownloadUrl(sourceDef);
+    }
+
+    /**
+     * 진행 중인 다운로드에 취소를 요청한다. 실제 중단과 화면 갱신은
+     * 다운로드 스레드가 취소를 감지한 뒤 처리한다.
+     */
+    @FXML
+    private void onCancelDownload() {
+        if (currentDownload == null) return;
+        currentDownload.cancel();
+        cancelDownloadBtn.setDisable(true);
+        downloadStatusLabel.setText("취소하는 중...");
+    }
+
+    /** 다운로드 종료(완료·취소·실패) 후 버튼 상태를 되돌린다. */
+    private void finishDownload() {
+        currentDownload = null;
+        downloadBtn.setDisable(false);
+        cancelDownloadBtn.setDisable(true);
     }
 
     @FXML

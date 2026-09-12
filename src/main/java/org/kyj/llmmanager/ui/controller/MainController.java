@@ -7,6 +7,8 @@ package org.kyj.llmmanager.ui.controller;
 import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.*;
 import org.kyj.llmmanager.service.InstallationService;
+import org.kyj.llmmanager.service.JarDownloader;
+import org.kyj.llmmanager.service.ServicePackLoader;
 import org.kyj.llmmanager.service.PluginManager;
 import org.kyj.llmmanager.service.SystemMonitorService;
 import org.kyj.llmmanager.setup.SetupCheckDialog;
@@ -51,14 +53,7 @@ import javafx.stage.Stage;
 import javafx.beans.value.ChangeListener;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.URI;
 import java.net.URL;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -753,9 +748,9 @@ public class MainController implements Initializable {
         // 설치 소스 결정 — 1) 번들 lib/ JAR, 2) downloadUrl, 3) 파일 선택 다이얼로그
         File sourceJar = findBundledJar(def);
         String downloadUrl = null;
-        if (sourceJar == null && def.getDownloadUrl() != null
-                && !def.getDownloadUrl().isBlank()) {
-            downloadUrl = def.getDownloadUrl().trim();
+        if (sourceJar == null) {
+            // 정의에 값이 없으면 같은 이름의 서비스 팩에서 찾는다
+            downloadUrl = new ServicePackLoader().resolveDownloadUrl(def);
         }
         if (sourceJar == null && downloadUrl == null) {
             // 번들 JAR도 다운로드 URL도 없음: 파일 선택 다이얼로그
@@ -829,92 +824,22 @@ public class MainController implements Initializable {
 
     /**
      * JAR을 URL에서 내려받아 설치 디렉토리에 저장한다. 호출 스레드에서 동기 실행되며,
-     * 진행 상황은 로그와 진행률 바에 반영한다.
+     * 진행 상황은 설치 로그와 진행률 바에 반영한다.
      *
-     * <p>받는 중에는 {@code .part} 임시 파일에 쓰고 완료 후 정식 이름으로 옮긴다.
-     * 중간에 실패하면 정식 파일이 만들어지지 않으므로, 깨진 JAR이 설치된 것으로
-     * 오인되지 않는다.
-     *
-     * @param url        JAR 다운로드 URL (리다이렉트 허용)
+     * @param url        JAR 다운로드 URL
      * @param installDir 저장할 디렉토리
      * @return 저장된 JAR 경로
      * @throws Exception 다운로드 실패, HTTP 오류 응답, 파일 쓰기 실패 시
      */
     private Path downloadJar(String url, Path installDir) throws Exception {
-        String fileName = jarFileNameFromUrl(url);
-        Path dest = installDir.resolve(fileName);
-        Path part = installDir.resolve(fileName + ".part");
-
-        Platform.runLater(() -> installLogArea.appendText(
-                "다운로드: " + url + "\n   →  " + dest + "\n"));
-
-        HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)   // GitHub 릴리즈는 CDN으로 리다이렉트된다
-                .connectTimeout(java.time.Duration.ofSeconds(30))
-                .build();
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                .header("User-Agent", "llm-manager")
-                .GET()
-                .build();
-
-        HttpResponse<InputStream> res = client.send(req, HttpResponse.BodyHandlers.ofInputStream());
-        if (res.statusCode() != 200) {
-            try (InputStream body = res.body()) { body.readAllBytes(); }   // 연결 정리
-            throw new IOException("다운로드 실패 — HTTP " + res.statusCode() + " : " + url);
-        }
-
-        long total = res.headers().firstValueAsLong("content-length").orElse(-1L);
-        long done = 0;
-        int lastPercent = -1;
-
-        try (InputStream in = res.body();
-             OutputStream out = Files.newOutputStream(part)) {
-            byte[] buf = new byte[1 << 16];
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                out.write(buf, 0, n);
-                done += n;
-
-                if (total > 0) {
-                    int percent = (int) (done * 100 / total);
-                    // 5% 단위로만 갱신 — 매 청크마다 UI 이벤트를 던지면 로그가 넘친다
-                    if (percent >= lastPercent + 5) {
-                        lastPercent = percent;
-                        final int p = percent;
-                        final long mb = done / (1024 * 1024);
-                        final long totalMb = total / (1024 * 1024);
-                        Platform.runLater(() -> {
-                            progressBar.setProgress(p / 100.0);
-                            installLogArea.appendText("  " + p + "% (" + mb + "/" + totalMb + " MB)\n");
-                        });
-                    }
-                }
+        return new JarDownloader().download(url, installDir, new JarDownloader.Progress() {
+            @Override public void onLog(String message) {
+                Platform.runLater(() -> installLogArea.appendText(message + "\n"));
             }
-        } catch (Exception e) {
-            Files.deleteIfExists(part);
-            throw e;
-        }
-
-        Files.move(part, dest, StandardCopyOption.REPLACE_EXISTING);
-        final long sizeMb = Files.size(dest) / (1024 * 1024);
-        Platform.runLater(() -> installLogArea.appendText("다운로드 완료 (" + sizeMb + " MB)\n"));
-        return dest;
-    }
-
-    /**
-     * 다운로드 URL의 마지막 경로 세그먼트를 JAR 파일명으로 사용한다.
-     *
-     * @param url 다운로드 URL
-     * @return JAR 파일명
-     * @throws IOException URL 끝이 .jar 파일명이 아닐 때
-     */
-    private String jarFileNameFromUrl(String url) throws IOException {
-        String path = URI.create(url).getPath();
-        String name = path == null ? "" : path.substring(path.lastIndexOf('/') + 1);
-        if (!name.toLowerCase().endsWith(".jar")) {
-            throw new IOException("다운로드 URL이 .jar 파일을 가리키지 않습니다: " + url);
-        }
-        return name;
+            @Override public void onProgress(double ratio) {
+                Platform.runLater(() -> progressBar.setProgress(ratio));
+            }
+        });
     }
 
     /**
