@@ -1,11 +1,17 @@
 name: SQL Gen MCP Server
 description: "자연어를 SQL로 변환하는 MCP 서버. LangChain4j + PostgreSQL + TEI 임베딩 기반."
 runtimeType: JAVA
-startCommand: "java -jar sql-gen-mcp-1.0.0.jar"
+startCommand: "java -jar sql-gen-mcp.jar"
 installDir: "${user.home}/llm-services/sql-gen-mcp"
 # 배포 전용 레포의 릴리즈 asset. 설치 시 이 URL에서 JAR을 바로 내려받는다
 # (설정 시 로컬 JAR 파일 선택 다이얼로그를 건너뛴다).
-downloadUrl: "https://github.com/zaruous/sql-mcp-release/releases/download/v1.0.0/sql-gen-mcp-1.0.0.jar"
+#
+# /releases/latest/download/ 는 항상 최신 릴리즈로 리다이렉트된다.
+# 릴리즈 워크플로가 버전 없는 사본(sql-gen-mcp.jar)을 함께 올리므로
+# 새 버전이 나와도 이 파일과 startCommand를 고칠 필요가 없다.
+# 특정 버전에 고정하려면 아래 형태로 바꾼다.
+#   https://github.com/zaruous/sql-mcp-release/releases/download/v1.1.0/sql-gen-mcp-1.1.0.jar
+downloadUrl: "https://github.com/zaruous/sql-mcp-release/releases/latest/download/sql-gen-mcp.jar"
 port: 7070
 healthCheckPath: /actuator/health
 installCommands: []
@@ -181,5 +187,5 @@ groovyScript: |
   // startCommand는 비어 있을 때만 기본값 지정 — 설치 시 실제 선택한 JAR 파일명으로
   // 갱신된 명령어를 수정(재설정) 다이얼로그가 덮어쓰지 않도록 한다
   if (!service.startCommand) {
-      service.startCommand = 'java -jar sql-gen-mcp-1.0.0.jar'
+      service.startCommand = 'java -jar sql-gen-mcp.jar'
   }
