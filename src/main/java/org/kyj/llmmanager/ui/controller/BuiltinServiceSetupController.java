@@ -359,6 +359,7 @@ public class BuiltinServiceSetupController {
         def.setDescription(sourceDef.getDescription());
         def.setRuntimeType(sourceDef.getRuntimeType());
         def.setRepoUrl(sourceDef.getRepoUrl());
+        def.setDownloadUrl(sourceDef.getDownloadUrl());
         def.setStartCommand(sourceDef.getStartCommand());
         def.setInstallCommands(sourceDef.getInstallCommands() != null
                 ? new ArrayList<>(sourceDef.getInstallCommands()) : new ArrayList<>());

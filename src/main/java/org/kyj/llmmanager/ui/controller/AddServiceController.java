@@ -65,6 +65,12 @@ public class AddServiceController {
     /** 사용자가 '추가' 버튼을 누르면 채워지는 최종 ServiceDefinition. 취소 시 null. */
     private ServiceDefinition result;
 
+    /**
+     * 폼에 마지막으로 채워 넣은 원본 정의. 폼에 입력란이 없는 필드(downloadUrl 등)를
+     * buildDefinition()에서 그대로 물려주기 위해 보관한다. 없으면 null.
+     */
+    private ServiceDefinition sourceDef;
+
     /** 템플릿 이름 → ServiceDefinition. lib/def/*.json에서 동적으로 로드. */
     private final Map<String, ServiceDefinition> templateDefs = new LinkedHashMap<>();
 
@@ -130,6 +136,7 @@ public class AddServiceController {
      * @param def 폼에 채울 ServiceDefinition
      */
     private void populateForm(ServiceDefinition def) {
+        sourceDef = def;
         if (def.getName() != null)        nameField.setText(def.getName());
         if (def.getDescription() != null) descriptionField.setText(def.getDescription());
         if (def.getRepoUrl() != null)     repoUrlField.setText(def.getRepoUrl());
@@ -431,6 +438,8 @@ public class AddServiceController {
         def.setName(nameField.getText().trim());
         def.setDescription(descriptionField.getText().trim());
         def.setRepoUrl(repoUrlField.getText().trim());
+        // 폼에 입력란이 없는 필드 — 수정 저장 시 값이 사라지지 않도록 원본에서 물려받는다
+        if (sourceDef != null) def.setDownloadUrl(sourceDef.getDownloadUrl());
         def.setInstallDir(installDirField.getText().trim());
         def.setRuntimeType(runtimeCombo.getValue());
         def.setStartCommand(startCommandArea.getText().trim());
