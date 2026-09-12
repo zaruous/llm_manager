@@ -29,6 +29,13 @@ public class ServiceDefinition {
     /** Git 클론 URL. 설치 시 git clone 에 사용. */
     private String repoUrl;
 
+    /**
+     * JAR 직접 다운로드 URL (선택). JAVA 런타임 서비스에서만 사용한다.
+     * 설정되어 있으면 설치 시 파일 선택 다이얼로그 대신 이 URL에서 JAR을 내려받는다.
+     * 파일명은 URL의 마지막 경로 세그먼트를 사용한다.
+     */
+    private String downloadUrl;
+
     /** 소스 코드를 설치(클론)할 로컬 경로 */
     private String installDir;
 
@@ -88,6 +95,8 @@ public class ServiceDefinition {
     public void setRuntimeType(RuntimeType runtimeType) { this.runtimeType = runtimeType; }
     public String getRepoUrl() { return repoUrl; }
     public void setRepoUrl(String repoUrl) { this.repoUrl = repoUrl; }
+    public String getDownloadUrl() { return downloadUrl; }
+    public void setDownloadUrl(String downloadUrl) { this.downloadUrl = downloadUrl; }
     public String getInstallDir() { return installDir; }
     public void setInstallDir(String installDir) { this.installDir = installDir; }
     public List<String> getInstallCommands() { return installCommands; }

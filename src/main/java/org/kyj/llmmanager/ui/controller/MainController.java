@@ -7,6 +7,8 @@ package org.kyj.llmmanager.ui.controller;
 import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.*;
 import org.kyj.llmmanager.service.InstallationService;
+import org.kyj.llmmanager.service.JarDownloader;
+import org.kyj.llmmanager.service.ServicePackLoader;
 import org.kyj.llmmanager.service.PluginManager;
 import org.kyj.llmmanager.service.SystemMonitorService;
 import org.kyj.llmmanager.setup.SetupCheckDialog;
@@ -743,10 +745,15 @@ public class MainController implements Initializable {
             return;
         }
 
-        // lib/ 폴더에 번들 JAR 탐색 → 있으면 파일 선택 없이 바로 복사
+        // 설치 소스 결정 — 1) 번들 lib/ JAR, 2) downloadUrl, 3) 파일 선택 다이얼로그
         File sourceJar = findBundledJar(def);
+        String downloadUrl = null;
         if (sourceJar == null) {
-            // 번들 JAR 없음: 파일 선택 다이얼로그
+            // 정의에 값이 없으면 같은 이름의 서비스 팩에서 찾는다
+            downloadUrl = new ServicePackLoader().resolveDownloadUrl(def);
+        }
+        if (sourceJar == null && downloadUrl == null) {
+            // 번들 JAR도 다운로드 URL도 없음: 파일 선택 다이얼로그
             FileChooser chooser = new FileChooser();
             chooser.setTitle("설치할 JAR 파일 선택");
             chooser.getExtensionFilters().add(
@@ -760,6 +767,7 @@ public class MainController implements Initializable {
         }
 
         final File jar = sourceJar;
+        final String url = downloadUrl;
         installLogArea.clear();
         progressBar.setProgress(-1);
         installBtn.setDisable(true);
@@ -773,16 +781,23 @@ public class MainController implements Initializable {
                             "디렉토리 생성: " + installDir + "\n"));
                 }
 
-                // JAR 복사
-                Path dest = installDir.resolve(jar.getName());
-                Platform.runLater(() -> installLogArea.appendText(
-                        "복사 중: " + jar.getAbsolutePath() + "\n"
-                        + "   →  " + dest + "\n"));
-                Files.copy(jar.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
+                // JAR 확보 — URL이 있으면 내려받고, 아니면 로컬 파일을 복사
+                final Path dest;
+                if (url != null) {
+                    dest = downloadJar(url, installDir);
+                } else {
+                    Path target = installDir.resolve(jar.getName());
+                    Platform.runLater(() -> installLogArea.appendText(
+                            "복사 중: " + jar.getAbsolutePath() + "\n"
+                            + "   →  " + target + "\n"));
+                    Files.copy(jar.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
+                    dest = target;
+                }
 
                 // 설정에 등록된 JAR 이름과 실제 설치한 파일명이 다르면(버전 업데이트 등)
                 // startCommand를 설치한 파일명으로 갱신 — 아니면 시작·설치 확인이 옛 이름을 바라본다
-                final String updatedCmd = withJarFileName(def.getStartCommand(), jar.getName());
+                final String updatedCmd = withJarFileName(def.getStartCommand(),
+                        dest.getFileName().toString());
 
                 Platform.runLater(() -> {
                     if (updatedCmd != null) {
@@ -805,6 +820,26 @@ public class MainController implements Initializable {
                 });
             }
         }, "jar-install-" + def.getName()).start();
+    }
+
+    /**
+     * JAR을 URL에서 내려받아 설치 디렉토리에 저장한다. 호출 스레드에서 동기 실행되며,
+     * 진행 상황은 설치 로그와 진행률 바에 반영한다.
+     *
+     * @param url        JAR 다운로드 URL
+     * @param installDir 저장할 디렉토리
+     * @return 저장된 JAR 경로
+     * @throws Exception 다운로드 실패, HTTP 오류 응답, 파일 쓰기 실패 시
+     */
+    private Path downloadJar(String url, Path installDir) throws Exception {
+        return new JarDownloader().download(url, installDir, new JarDownloader.Progress() {
+            @Override public void onLog(String message) {
+                Platform.runLater(() -> installLogArea.appendText(message + "\n"));
+            }
+            @Override public void onProgress(double ratio) {
+                Platform.runLater(() -> progressBar.setProgress(ratio));
+            }
+        });
     }
 
     /**
@@ -891,33 +926,56 @@ public class MainController implements Initializable {
             Path installDir = Path.of(def.getInstallDir());
             if (installDir.toFile().exists()) {
                 Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                        "설치 디렉토리를 삭제하시겠습니까?\n" + installDir,
-                        ButtonType.YES, ButtonType.NO);
+                        "서비스를 제거하고 설치 디렉토리를 삭제합니다.\n" + installDir
+                        + "\n\n계속하시겠습니까?",
+                        ButtonType.YES, ButtonType.CANCEL);
                 confirm.setTitle("제거 확인");
-                confirm.showAndWait().ifPresent(btn -> {
-                    if (btn == ButtonType.YES) {
-                        new Thread(() -> {
-                            try {
-                                deleteDirectory(installDir);
-                                Platform.runLater(() -> {
-                                    installLogArea.appendText("삭제 완료: " + installDir + "\n");
-                                    markUninstalled();
-                                });
-                            } catch (Exception e) {
-                                Platform.runLater(() ->
-                                        installLogArea.appendText("삭제 오류: " + e.getMessage() + "\n"));
-                            }
-                        }, "uninstall-" + def.getName()).start();
-                        return;
+
+                if (uninstallChoice(confirm.showAndWait()) == UninstallChoice.ABORT) return;
+
+                new Thread(() -> {
+                    try {
+                        deleteDirectory(installDir);
+                        Platform.runLater(() -> {
+                            installLogArea.appendText("삭제 완료: " + installDir + "\n");
+                            markUninstalled();
+                        });
+                    } catch (Exception e) {
+                        Platform.runLater(() ->
+                                installLogArea.appendText("삭제 오류: " + e.getMessage() + "\n"));
                     }
-                    // 아니오: 파일은 남기고 상태만 변경
-                    markUninstalled();
-                });
+                }, "uninstall-" + def.getName()).start();
                 return;
             }
         }
 
         markUninstalled();
+    }
+
+    /** 제거 확인 창의 응답을 어떻게 처리할지. */
+    enum UninstallChoice {
+        /** 제거하지 않는다 — 취소를 골랐거나 창을 그냥 닫은 경우 */
+        ABORT,
+        /** 설치 디렉토리를 삭제하고 제거한다 */
+        DELETE
+    }
+
+    /**
+     * 제거 확인 창의 응답을 처리 방식으로 변환한다.
+     *
+     * <p>명시적으로 '예'를 고른 경우에만 제거를 진행한다. 예전에는 '아니오'도
+     * 상태만 미설치로 바꿔서, 취소했는데 "제거되었습니다"가 찍히고 설치 버튼이
+     * 열리는 문제가 있었다. 설치 여부는 디스크에서 판정하므로(installDir 존재 여부)
+     * 파일이 남은 채 미설치로 표시하면 화면이 실제와 어긋나고, 목록을 새로 그리면
+     * 다시 설치됨으로 돌아간다.
+     *
+     * @param answer 확인 창의 응답. 창을 닫았으면 비어 있다.
+     * @return 처리 방식
+     */
+    static UninstallChoice uninstallChoice(Optional<ButtonType> answer) {
+        return answer.filter(btn -> btn == ButtonType.YES).isPresent()
+                ? UninstallChoice.DELETE
+                : UninstallChoice.ABORT;
     }
 
     /** 설치 탭 UI를 미설치 상태로 초기화한다. */

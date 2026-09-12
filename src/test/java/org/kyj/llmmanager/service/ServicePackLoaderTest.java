@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * ServicePackLoader의 YAML 로드·다중 팩 로딩·디렉토리 탐색 로직을 검증한다.
@@ -148,5 +149,51 @@ class ServicePackLoaderTest {
         if (dir != null) {
             assertTrue(dir.isAbsolute(), "절대 경로를 반환해야 한다");
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // resolveDownloadUrl — 정의에 없으면 같은 이름의 팩에서 찾는다
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    void resolveDownloadUrl_usesOwnValueWhenPresent() {
+        ServiceDefinition def = new ServiceDefinition();
+        def.setName("SQL Gen MCP Server");
+        def.setDownloadUrl("  https://example.com/a.jar  ");
+
+        // 정의에 값이 있으면 팩을 보지 않고 그대로(trim) 쓴다
+        assertEquals("https://example.com/a.jar",
+                new ServicePackLoader().resolveDownloadUrl(def));
+    }
+
+    @Test
+    void resolveDownloadUrl_returnsNullForUnknownName() {
+        ServiceDefinition def = new ServiceDefinition();
+        def.setName("존재하지 않는 서비스 " + System.nanoTime());
+
+        assertNull(new ServicePackLoader().resolveDownloadUrl(def));
+    }
+
+    @Test
+    void resolveDownloadUrl_returnsNullForNullInput() {
+        assertNull(new ServicePackLoader().resolveDownloadUrl(null));
+    }
+
+    @Test
+    void resolveDownloadUrl_fallsBackToPackByName() {
+        // service-packs/sql-gen-mcp.yml의 downloadUrl을 이름으로 찾아온다.
+        // downloadUrl이 생기기 전에 등록된 서비스가 이 경로로 구제된다.
+        ServicePackLoader loader = new ServicePackLoader();
+        String fromPack = loader.loadAll().stream()
+                .filter(p -> "SQL Gen MCP Server".equals(p.getName()))
+                .map(ServiceDefinition::getDownloadUrl)
+                .findFirst().orElse(null);
+        assumeTrue(fromPack != null, "service-packs/sql-gen-mcp.yml이 있어야 하는 테스트");
+
+        ServiceDefinition stored = new ServiceDefinition();
+        stored.setName("SQL Gen MCP Server");
+        stored.setDownloadUrl(null);          // 옛 방식으로 저장된 서비스
+
+        assertEquals(fromPack.trim(), loader.resolveDownloadUrl(stored));
     }
 }

@@ -82,6 +82,35 @@ public class ServicePackLoader {
     }
 
     /**
+     * 서비스 정의에 적용할 JAR 다운로드 URL을 결정한다.
+     *
+     * <p>정의에 값이 있으면 그대로 쓰고, 없으면 같은 이름의 서비스 팩에서 가져온다.
+     * downloadUrl이 생기기 전에 등록된 서비스는 저장된 정의에 이 값이 없고
+     * packId도 비어 있어, 이름으로 팩을 찾아 메우지 않으면 다운로드 기능을
+     * 쓸 수 없기 때문이다.
+     *
+     * @param def 대상 서비스 정의. null 허용
+     * @return 다운로드 URL. 정의에도 팩에도 없으면 null
+     */
+    public String resolveDownloadUrl(ServiceDefinition def) {
+        if (def == null) return null;
+
+        String own = def.getDownloadUrl();
+        if (own != null && !own.isBlank()) return own.trim();
+
+        String name = def.getName();
+        if (name == null || name.isBlank()) return null;
+
+        return loadAll().stream()
+                .filter(pack -> name.equals(pack.getName()))
+                .map(ServiceDefinition::getDownloadUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .map(String::trim)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
      * service-packs/ 디렉토리 경로를 반환한다.
      * 작업 디렉토리 기준으로 먼저 탐색하고, 없으면 JAR 위치에서 상위로 거슬러 탐색한다.
      *

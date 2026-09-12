@@ -24,6 +24,19 @@
         <TextField fx:id="installDirField" HBox.hgrow="ALWAYS"
                    promptText="실행 파일이 있는 디렉토리 경로"/>
         <Button text="찾기..." onAction="#onBrowse"/>
+        <Button fx:id="checkLatestBtn" text="최신 확인" onAction="#onCheckLatest"
+                visible="false" managed="false"/>
+        <Button fx:id="downloadBtn" text="⬇ 다운로드" onAction="#onDownload"
+                visible="false" managed="false"/>
+    </HBox>
+
+    <!-- 다운로드 진행 표시: 다운로드 시작 시에만 보인다 -->
+    <HBox fx:id="downloadStatusRow" spacing="8" alignment="CENTER_LEFT"
+          visible="false" managed="false">
+        <Label minWidth="80"/>
+        <ProgressBar fx:id="downloadProgress" prefWidth="180" progress="0"/>
+        <Label fx:id="downloadStatusLabel" text="" wrapText="true" HBox.hgrow="ALWAYS"/>
+        <Button fx:id="cancelDownloadBtn" text="취소" onAction="#onCancelDownload"/>
     </HBox>
 
     <!-- 동적 인수 섹션 (Controller에서 채워짐) -->
