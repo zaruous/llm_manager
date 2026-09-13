@@ -19,6 +19,7 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
@@ -155,6 +156,12 @@ public class WikiIngestDialog {
         HBox categoryRow = new HBox(8, new Label("raw/ 하위 분류:"), categoryCombo);
         categoryRow.setAlignment(Pos.CENTER_LEFT);
 
+        CheckBox directImportCheck = new CheckBox(
+                "옵시디언 링크 구조 보존 (LLM Ingest 건너뛰고 벡터 색인만 빠르게 적재)");
+        Label directImportHint = new Label(
+                "markdown만 지원합니다. wiki/sources/에 원문 wrapper를 만들고 즉시 벡터 색인을 갱신합니다.");
+        VBox directImportBox = new VBox(4, directImportCheck, directImportHint);
+
         ProgressBar progressBar = new ProgressBar(0);
         progressBar.setMaxWidth(Double.MAX_VALUE);
         Label progressLabel = new Label("대기 중");
@@ -242,13 +249,22 @@ public class WikiIngestDialog {
                         return;
                     }
 
-                    IngestPlan plan = WikiIngestPlanner.plan(copied, workspaceRoot,
-                            createPageExtractor(log), log);
-                    log.accept("실행 계획: 파일 " + plan.fileCount() + "개 (총 "
-                            + WikiIngestPlanner.formatBytes(plan.totalBytes())
-                            + ") → 에이전트 실행 " + plan.tasks().size() + "회");
+                    boolean directImport = directImportCheck.isSelected();
+                    boolean allMarkdown = copied.stream().allMatch(this::isMarkdown);
+                    if (directImport && allMarkdown) {
+                        runDirectImport(copied, workspaceRoot, log, progressBar, progressLabel);
+                    } else {
+                        if (directImport) {
+                            log.accept("옵시디언 직접 적재는 markdown만 지원합니다 — 기본 LLM ingest로 전환합니다.");
+                        }
+                        IngestPlan plan = WikiIngestPlanner.plan(copied, workspaceRoot,
+                                createPageExtractor(log), log);
+                        log.accept("실행 계획: 파일 " + plan.fileCount() + "개 (총 "
+                                + WikiIngestPlanner.formatBytes(plan.totalBytes())
+                                + ") → 에이전트 실행 " + plan.tasks().size() + "회");
 
-                    runPlan(plan, workspaceRoot, stopRequested, log, progressBar, progressLabel);
+                        runPlan(plan, workspaceRoot, stopRequested, log, progressBar, progressLabel);
+                    }
                 } catch (Exception ex) {
                     log.accept("[오류] " + ex.getMessage());
                 } finally {
@@ -268,6 +284,7 @@ public class WikiIngestDialog {
                 selectionButtons,
                 selectionList,
                 categoryRow,
+                directImportBox,
                 progressRow,
                 terminalArea,
                 buttons);
@@ -344,9 +361,36 @@ public class WikiIngestDialog {
         }
     }
 
+    /** direct import는 에이전트 분해 없이 내부 wiki.ingest command 1회로 처리한다. */
+    private void runDirectImport(List<Path> copiedFiles, Path workspaceRoot,
+                                 Consumer<String> onOutput,
+                                 ProgressBar progressBar, Label progressLabel) {
+        updateProgress(progressBar, progressLabel, 0, 1, "옵시디언 직접 적재 준비");
+        String payload = copiedFiles.stream()
+                .map(path -> path.toAbsolutePath().normalize().toString())
+                .collect(Collectors.joining("\n"));
+        LinkedHashMap<String, String> options = new LinkedHashMap<>();
+        options.put("directVectorImport", "true");
+        options.put("directImportMode", "obsidian-fast");
+
+        var result = AppContext.getInstance().getPluginCommandExecutor().executeStreaming(
+                contribution.pluginId(),
+                contribution.command(),
+                new PluginCommandRequest(workspaceRoot.toString(), payload,
+                        null, null, options),
+                onOutput);
+        updateProgress(progressBar, progressLabel, 1, 1,
+                result.success() ? "완료" : "실패");
+        if (!result.success()) {
+            onOutput.accept("[오류] " + result.message());
+        } else {
+            onOutput.accept(result.message());
+        }
+    }
+
     /**
      * 대용량 PDF 페이지 전처리 훅을 만든다. 플러그인의 extract_pages.py를
-     * 앱 설정의 Python으로 실행한다 — 플러그인 디렉토리를 못 찾으면 null을
+
      * 반환해 플래너가 단독 작업 모드로 처리하게 한다.
      */
     private WikiIngestPlanner.PageExtractor createPageExtractor(Consumer<String> log) {
@@ -585,9 +629,13 @@ public class WikiIngestDialog {
         area.setScrollTop(Double.MAX_VALUE);
     }
 
+    private boolean isMarkdown(Path path) {
+        return path.getFileName().toString().toLowerCase().endsWith(".md");
+    }
+
     /**
      * plugin.json의 ingest.include / ingest.exclude 패턴을 컴파일해 두는 규칙 집합.
-     *
+
      * include 패턴은 파일명에만 매칭 (확장자 화이트리스트 역할).
      * exclude 패턴은 상대 경로 전체에 매칭 (경로 블랙리스트 역할).
      * 두 패턴 모두 gitignore 스타일 glob을 사용한다 —

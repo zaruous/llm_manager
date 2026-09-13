@@ -4,6 +4,8 @@
  */
 package org.kyj.llmmanager.service;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,6 +24,20 @@ import static org.junit.jupiter.api.Assertions.*;
  * vec0 네이티브 바이너리 없이 실행 가능한 테스트만 포함한다.
  */
 class WikiVectorRepositoryTest {
+
+    /** 중앙 벡터 저장소를 임시 디렉토리로 격리해 실제 사용자 홈을 오염시키지 않는다. */
+    @TempDir
+    static Path vectorBase;
+
+    @BeforeAll
+    static void isolateVectorDir() {
+        System.setProperty(WikiVectorRepository.VECTOR_DIR_PROP, vectorBase.toString());
+    }
+
+    @AfterAll
+    static void restoreVectorDir() {
+        System.clearProperty(WikiVectorRepository.VECTOR_DIR_PROP);
+    }
 
     // ─────────────────────────────────────────────────────────────
     // BLOB 직렬화 (package-private static 메서드 직접 검증)

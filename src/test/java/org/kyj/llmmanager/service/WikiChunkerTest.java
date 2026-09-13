@@ -140,6 +140,62 @@ class WikiChunkerTest {
     }
 
     @Test
+    void frontmatter_summaryAndDescriptionAreIncludedInChunkHeader(@TempDir Path dir) throws IOException {
+        Path f = dir.resolve("page.md");
+        Files.writeString(f, """
+                ---
+                title: Backflush
+                type: source
+                tags: concept, INV
+                summary: 역방향 자재 차감 개요
+                description: 생산 완료 시점 자재 차감 규칙 정리
+                ---
+                ## 본문
+                내용입니다.
+                """);
+
+        List<WikiChunker.Chunk> chunks = WikiChunker.chunk(f, "sources");
+
+        assertEquals(1, chunks.size());
+        assertTrue(chunks.get(0).content().contains("요약: 역방향 자재 차감 개요"));
+        assertTrue(chunks.get(0).content().contains("설명: 생산 완료 시점 자재 차감 규칙 정리"));
+    }
+
+    @Test
+    void summaryAndDescriptionChangeContentHashButKeepBodyHash(@TempDir Path dir) throws IOException {
+        Path f1 = dir.resolve("a.md");
+        Path f2 = dir.resolve("b.md");
+        Files.writeString(f1, """
+                ---
+                title: Backflush
+                type: source
+                summary: 첫 요약
+                description: 첫 설명
+                ---
+                ## 본문
+                같은 본문입니다.
+                """);
+        Files.writeString(f2, """
+                ---
+                title: Backflush
+                type: source
+                summary: 바뀐 요약
+                description: 바뀐 설명
+                ---
+                ## 본문
+                같은 본문입니다.
+                """);
+
+        List<WikiChunker.Chunk> c1 = WikiChunker.chunk(f1, "sources");
+        List<WikiChunker.Chunk> c2 = WikiChunker.chunk(f2, "sources");
+
+        assertEquals(1, c1.size());
+        assertEquals(1, c2.size());
+        assertNotEquals(c1.get(0).contentHash(), c2.get(0).contentHash());
+        assertEquals(WikiChunker.bodyHash(c1.get(0).content()), WikiChunker.bodyHash(c2.get(0).content()));
+    }
+
+    @Test
     void frontmatterNotIncludedInChunkContent(@TempDir Path dir) throws IOException {
         Path f = dir.resolve("page.md");
         Files.writeString(f, """

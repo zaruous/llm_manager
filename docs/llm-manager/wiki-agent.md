@@ -67,7 +67,8 @@
 | `wiki_search` | 벡터 색인 검색, 색인/임베딩 실패 시 키워드 검색 폴백 |
 | `wiki_get_page` | 위키 페이지 원문 조회 |
 | `wiki_overview` | overview.md, index.md, 페이지 통계 조회 |
-| `wiki_query` | 관련 청크를 질문 컨텍스트로 반환 |
+| `wiki_context` | 관련 청크를 질문 컨텍스트로 반환 |
+| `wiki_query` | `wiki_context` 하위 호환 별칭 |
 | `wiki_list_contradictions` | Contradictions 섹션이 있는 페이지 목록 |
 | `wiki_health` | 빈/스텁 파일, index.md 동기화, log.md ingest 누락 점검 |
 | `wiki_lint` | 고아 페이지, 깨진 위키링크, 누락 엔티티 후보, sparse 페이지, graph.json 품질 점검 |

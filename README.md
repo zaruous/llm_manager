@@ -72,7 +72,8 @@ start.bat
 start.bat --api.server.enabled=true --api.server.port=9090
 ```
 
-`start.bat`은 `build/install/` 배포본이 없으면 `installDist`를 자동 실행한다.
+`start.bat`은 `build/install/` 배포본이 없으면 저장소의 `gradlew.bat`로
+`installDist`를 자동 실행하므로 시스템 전역 Gradle 설치가 필요하지 않다.
 
 ---
 

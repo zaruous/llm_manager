@@ -113,18 +113,24 @@ startScripts {
         def bat = windowsScript.text
         def mpWin = javafxJarNames.collect { '%APP_HOME%\\lib\\' + it }.join(';')
         def addOpens = '--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED'
-        bat = bat.replace(
-            'set DEFAULT_JVM_OPTS=',
-            "set DEFAULT_JVM_OPTS=--module-path \"${mpWin}\" --add-modules javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base ${addOpens}"
+        def defaultJvmOptsWin = "set DEFAULT_JVM_OPTS=--module-path \"${mpWin}\" " +
+                "--add-modules javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base ${addOpens}"
+        // applicationDefaultJvmArgs가 이미 DEFAULT_JVM_OPTS를 채우므로 접두어를 붙이면
+        // 옵션 사이 공백이 사라진다. 생성된 줄 전체를 교체해 --add-opens 중복도 막는다.
+        bat = bat.replaceFirst(
+            /(?m)^set DEFAULT_JVM_OPTS=.*$/,
+            java.util.regex.Matcher.quoteReplacement(defaultJvmOptsWin)
         )
         windowsScript.text = bat
 
         // Unix shell
         def sh = unixScript.text
         def mpUnix = javafxJarNames.collect { '$APP_HOME/lib/' + it }.join(':')
-        sh = sh.replace(
-            'DEFAULT_JVM_OPTS=""',
-            "DEFAULT_JVM_OPTS=\"--module-path \\\"${mpUnix}\\\" --add-modules javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base ${addOpens}\""
+        def defaultJvmOptsUnix = "DEFAULT_JVM_OPTS=\"--module-path \\\"${mpUnix}\\\" " +
+                "--add-modules javafx.controls,javafx.fxml,javafx.web,javafx.graphics,javafx.base ${addOpens}\""
+        sh = sh.replaceFirst(
+            /(?m)^DEFAULT_JVM_OPTS=.*$/,
+            java.util.regex.Matcher.quoteReplacement(defaultJvmOptsUnix)
         )
         unixScript.text = sh
     }

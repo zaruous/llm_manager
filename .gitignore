@@ -36,3 +36,6 @@ deploy/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python 바이트코드 캐시 (plugins/wiki-agent)
+__pycache__/

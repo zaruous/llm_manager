@@ -37,8 +37,9 @@ if %JAVA_MAJOR% lss 17 (
 )
 echo [OK] Java %JAVA_VER%
 
-rem -- Run from distribution if available, otherwise build first --
+rem -- Run from distribution if available, otherwise build with the bundled Gradle Wrapper --
 set DIST_BAT=%~dp0build\install\llm-manage\bin\llm-manage.bat
+set GRADLEW_BAT=%~dp0gradlew.bat
 
 if exist "%DIST_BAT%" (
     echo [OK] Distribution found. Starting...
@@ -47,18 +48,17 @@ if exist "%DIST_BAT%" (
     goto end
 )
 
-rem -- Distribution not found: build with Gradle --
+rem -- Distribution not found: build with the repository's Gradle Wrapper --
 echo [INFO] Distribution not found. Building now...
 echo.
 
-where gradle > nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] gradle command not found. Please install Gradle and add to PATH.
+if not exist "%GRADLEW_BAT%" (
+    echo [ERROR] Gradle Wrapper not found: %GRADLEW_BAT%
     pause
     exit /b 1
 )
 
-gradle installDist
+call "%GRADLEW_BAT%" installDist
 if %ERRORLEVEL% neq 0 (
     echo.
     echo [ERROR] Build failed. Check the error messages above.
