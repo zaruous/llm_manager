@@ -158,6 +158,8 @@ LLMManager/
 
 ### 자동 업데이트 실패 수정 (2026-09-14, v1.2.1+)
 
+> 상세 분석·검증 기록: [docs/done/자동업데이트-실패-원인분석-및-수정.md](docs/done/자동업데이트-실패-원인분석-및-수정.md)
+
 - **원인**: 업데이트 스크립트(update.bat)가 앱 종료 과정의 `taskkill /F /T`에 맞아 죽었다. ShutdownHook의
   `stopAllSync()`가 PID 파일의 낡은 PID(Windows는 PID를 빠르게 재사용)를 검증 없이 kill하고,
   `timeout /t 5`는 콘솔 없는 프로세스에서 즉시 실패해 유예가 없었으며, 실패는 어디에도 보고되지 않았다.
