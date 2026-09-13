@@ -15,9 +15,11 @@ import java.util.regex.Pattern;
 /**
  * 위키 마크다운 파일을 임베딩용 의미 보강 텍스트로 전처리한다.
  *
- * frontmatter(title·type·tags)를 추출하고, 누락 시 h1 헤딩·파일명·카테고리로 보정한다.
+ * frontmatter(title·type·tags·summary·description)를 추출하고,
+ * 누락 시 h1 헤딩·파일명·카테고리로 보정한다.
  * 본문을 ## 이상 헤딩 경계로 섹션 분할한 뒤 목표/최대 청크 크기에 맞춰 재분할하며,
- * 각 청크 앞에 "제목/유형/경로/태그/섹션" 메타데이터 헤더를 주입해 검색 문맥을 보강한다.
+ * 각 청크 앞에 "제목/유형/경로/태그/요약/설명/섹션" 메타데이터 헤더를 주입해
+ * 검색 문맥을 보강한다.
  * 코드 펜스(```)는 의미 훼손을 막기 위해 최대 크기를 초과해도 분할하지 않는다.
  */
 public final class WikiPreprocessor {
@@ -105,6 +107,8 @@ public final class WikiPreprocessor {
 
         String tags = fm.get("tags");
         if (tags == null) tags = "";
+        String summary = blankToEmpty(fm.get("summary"));
+        String description = blankToEmpty(fm.get("description"));
 
         // title: frontmatter → h1 헤딩 → 파일명 순 보정. h1은 본문에서 제거해 청크 중복을 막는다.
         String title = fm.get("title");
@@ -123,7 +127,8 @@ public final class WikiPreprocessor {
         // ── 섹션 분할 → 청크 조립 ────────────────────────────────
         List<String> chunks = new ArrayList<>();
         for (Section section : splitSections(body)) {
-            String header = buildHeader(title, type, safePath, tags, section.heading());
+            String header = buildHeader(title, type, safePath, tags,
+                    summary, description, section.heading());
             for (String chunkBody : chunkSection(section.content(), options)) {
                 String text = chunkBody.strip();
                 if (!text.isBlank()) chunks.add(header + "\n\n" + text);
@@ -338,16 +343,23 @@ public final class WikiPreprocessor {
      * 헤더와 본문은 빈 줄 하나로 구분되므로 헤더 내부에는 빈 줄이 없어야 한다.
      */
     private static String buildHeader(String title, String type, String relativePath,
-                                      String tags, String sectionHeading) {
+                                      String tags, String summary,
+                                      String description, String sectionHeading) {
         StringBuilder sb = new StringBuilder();
         sb.append("제목: ").append(title);
         sb.append("\n유형: ").append(type);
         sb.append("\n경로: ").append(relativePath);
         if (tags != null && !tags.isBlank()) sb.append("\n태그: ").append(tags);
+        if (summary != null && !summary.isBlank()) sb.append("\n요약: ").append(summary);
+        if (description != null && !description.isBlank()) sb.append("\n설명: ").append(description);
         if (sectionHeading != null && !sectionHeading.isBlank()) {
             sb.append("\n섹션: ").append(sectionHeading);
         }
         return sb.toString();
+    }
+
+    private static String blankToEmpty(String value) {
+        return value == null ? "" : value.strip();
     }
 
     /** 파일명에서 확장자를 제거해 반환한다. 파일이 null이면 빈 문자열. */

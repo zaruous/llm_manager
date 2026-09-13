@@ -45,9 +45,13 @@ class WikiMcpServicePackTest {
 
         String oldPluginsDir = System.getProperty("llm.pluginsDir");
         String oldInstallBase = System.getProperty("INSTALL_BASE");
+        String oldVectorDir = System.getProperty(WikiVectorRepository.VECTOR_DIR_PROP);
         try {
             System.setProperty("llm.pluginsDir", tempDir.resolve("plugins").toString());
             System.setProperty("INSTALL_BASE", installBase.toString());
+            // groovy의 resolveDbFile() 호출이 실제 사용자 홈에 레지스트리를 만들지 않도록 격리
+            System.setProperty(WikiVectorRepository.VECTOR_DIR_PROP,
+                    tempDir.resolve("vector-base").toString());
 
             ServiceDefinition def = new ServicePackLoader()
                     .load(Path.of("service-packs", "wiki-mcp.yml").toFile());
@@ -59,8 +63,12 @@ class WikiMcpServicePackTest {
             assertEquals(installBase.toString(), def.getInstallDir());
             assertEquals(installBase.toString(), def.getWorkingDir());
             assertTrue(def.getStartCommand().contains("server.py"));
-            assertEquals(workspace.resolve(".llm-manager").resolve("wiki-vector.sqlite").toString(),
-                    def.getArgValues().get("db-path"));
+            // 중앙 벡터 저장소 규칙: vector/<워크스페이스 ID>/ — ID는 레지스트리가 발급하며
+            // 같은 워크스페이스는 항상 같은 경로를 돌려받는다
+            String dbPath = def.getArgValues().get("db-path");
+            assertEquals(WikiVectorRepository.resolveDbFile(workspace).toString(), dbPath);
+            assertTrue(dbPath.startsWith(tempDir.resolve("vector-base").toString()));
+            assertTrue(dbPath.contains("workspace-"));
             assertFalse(def.getInstallCommands().isEmpty());
             assertTrue(def.getInstallCommands().get(0).contains("server.py"));
             assertTrue(def.getInstallCommands().get(0).contains("tools"));
@@ -80,6 +88,7 @@ class WikiMcpServicePackTest {
         } finally {
             restoreProperty("llm.pluginsDir", oldPluginsDir);
             restoreProperty("INSTALL_BASE", oldInstallBase);
+            restoreProperty(WikiVectorRepository.VECTOR_DIR_PROP, oldVectorDir);
         }
     }
 

@@ -51,7 +51,72 @@ parser.add_argument("--settings-path", default="", help="LLM Manager settings.js
 args = parser.parse_args()
 
 WORKSPACE = Path(args.workspace).resolve()
-DB_PATH = args.db_path or str(WORKSPACE / ".llm-manager" / "wiki-vector.sqlite")
+
+
+def _workspace_registry_id() -> str:
+    """중앙 벡터 저장소의 workspaces.json에서 워크스페이스 ID를 조회하거나 신규 발급한다.
+
+    파일 포맷·ID 규칙(<폴더명>-<랜덤 8자리 hex>)은 Java WikiVectorWorkspaceRegistry와
+    공유하므로 스키마 변경 시 함께 수정해야 한다.
+    """
+    import uuid
+
+    base = Path.home() / "llm-services" / "wiki-mcp-server" / "vector"
+    registry_file = base / "workspaces.json"
+    ws_key = str(WORKSPACE)
+
+    data = {"version": 1, "workspaces": {}}
+    if registry_file.is_file():
+        try:
+            loaded = json.loads(registry_file.read_text(encoding="utf-8"))
+            if isinstance(loaded.get("workspaces"), dict):
+                data = loaded
+        except Exception:
+            print(f"[wiki-mcp] WARNING: workspaces.json 파싱 실패, 새로 생성: {registry_file}",
+                  file=sys.stderr)
+
+    workspaces = data["workspaces"]
+    for key, entry in workspaces.items():
+        # Windows 파일 시스템은 대소문자를 구분하지 않으므로 키 비교도 무시한다
+        matched = key.lower() == ws_key.lower() if os.name == "nt" else key == ws_key
+        if matched and isinstance(entry, dict) and entry.get("id"):
+            return entry["id"]
+
+    existing_ids = {e.get("id") for e in workspaces.values() if isinstance(e, dict)}
+    while True:
+        new_id = f"{WORKSPACE.name}-{uuid.uuid4().hex[:8]}"
+        if new_id not in existing_ids:
+            break
+    workspaces[ws_key] = {"id": new_id, "created": date.today().isoformat()}
+
+    base.mkdir(parents=True, exist_ok=True)
+    tmp = registry_file.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, registry_file)
+    return new_id
+
+
+def _resolve_db_path(configured: str) -> str:
+    """벡터 DB 경로를 결정한다.
+
+    기본 규칙은 중앙 저장소 ~/llm-services/wiki-mcp-server/vector/<워크스페이스 ID>/
+    (WikiVectorRepository.resolveDbFile()·wiki-mcp.yml groovyScript와 동일 규칙).
+    지정 경로에 DB가 아직 없고 구버전 위치({workspace}/.llm-manager/)에 DB가 있으면
+    구버전을 사용한다 — LLM Manager 앱이 재색인할 때 중앙 저장소로 이동된다.
+    """
+    if configured:
+        target = Path(configured)
+    else:
+        target = (Path.home() / "llm-services" / "wiki-mcp-server" / "vector"
+                  / _workspace_registry_id() / "wiki-vector.sqlite")
+    legacy = WORKSPACE / ".llm-manager" / "wiki-vector.sqlite"
+    if not target.is_file() and legacy.is_file():
+        print(f"[wiki-mcp] NOTICE: 구버전 벡터 DB 사용: {legacy}", file=sys.stderr)
+        return str(legacy)
+    return str(target)
+
+
+DB_PATH = _resolve_db_path(args.db_path)
 VEC0_PATH = args.vec0_path
 EMBEDDING_URL = args.embedding_url.rstrip("/")
 WIKI_DIR = WORKSPACE / "wiki" if (WORKSPACE / "wiki" / "index.md").is_file() else WORKSPACE

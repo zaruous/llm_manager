@@ -34,6 +34,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * 위키 워크스페이스의 벡터 색인 상태를 페이지별로 조회하는 다이얼로그.
@@ -44,13 +45,33 @@ import java.util.List;
  */
 public class WikiIndexStatusDialog {
 
+    private static final WikiIndexStatusWorkflow.IndexOperations DEFAULT_INDEX_OPERATIONS =
+            new WikiIndexStatusWorkflow.IndexOperations() {
+                @Override
+                public WorkspaceIndexMetadata inspectWorkspace(Path workspace) throws SQLException {
+                    return AppContext.getInstance().getWikiIndexService().inspectWorkspace(workspace);
+                }
+
+                @Override
+                public WikiIndexService.IndexResult reindexWorkspace(Path workspace,
+                                                                     Consumer<String> onProgress) {
+                    return AppContext.getInstance().getWikiIndexService().indexWorkspace(workspace, onProgress);
+                }
+            };
+
     private final Stage owner;
+    private final WikiIndexStatusWorkflow.IndexOperations indexOperations;
 
     /**
      * @param owner 부모 Stage (모달 기준)
      */
     public WikiIndexStatusDialog(Stage owner) {
+        this(owner, DEFAULT_INDEX_OPERATIONS);
+    }
+
+    WikiIndexStatusDialog(Stage owner, WikiIndexStatusWorkflow.IndexOperations indexOperations) {
         this.owner = owner;
+        this.indexOperations = indexOperations;
     }
 
     /**
@@ -85,7 +106,8 @@ public class WikiIndexStatusDialog {
 
         Button inspectBtn = new Button("색인 상태 조회");
         inspectBtn.setDefaultButton(true);
-        HBox topRow = new HBox(6, pathField, browseBtn, inspectBtn);
+        Button reindexBtn = new Button("전체 재색인");
+        HBox topRow = new HBox(6, pathField, browseBtn, inspectBtn, reindexBtn);
         topRow.setAlignment(Pos.CENTER_LEFT);
 
         // 요약 레이블
@@ -106,47 +128,8 @@ public class WikiIndexStatusDialog {
         root.setPadding(new Insets(14));
         VBox.setVgrow(table, Priority.ALWAYS);
 
-        inspectBtn.setOnAction(e -> {
-            String dir = pathField.getText().trim();
-            if (dir.isBlank()) {
-                summaryLabel.setText("워크스페이스 경로를 입력하세요.");
-                return;
-            }
-            Path workspace = Path.of(dir);
-            if (!Files.isDirectory(workspace)) {
-                summaryLabel.setText("유효하지 않은 디렉토리: " + dir);
-                return;
-            }
-            inspectBtn.setDisable(true);
-            spinner.setVisible(true);
-            summaryLabel.setText("조회 중...");
-            table.getItems().clear();
-
-            Thread worker = new Thread(() -> {
-                try {
-                    WikiIndexService svc = AppContext.getInstance().getWikiIndexService();
-                    WorkspaceIndexMetadata meta = svc.inspectWorkspace(workspace);
-                    List<RowItem> rows = meta.pages().stream()
-                            .map(RowItem::from)
-                            .toList();
-                    String summary = buildSummary(meta);
-                    Platform.runLater(() -> {
-                        table.getItems().setAll(rows);
-                        summaryLabel.setText(summary);
-                        spinner.setVisible(false);
-                        inspectBtn.setDisable(false);
-                    });
-                } catch (SQLException ex) {
-                    Platform.runLater(() -> {
-                        summaryLabel.setText("조회 실패: " + ex.getMessage());
-                        spinner.setVisible(false);
-                        inspectBtn.setDisable(false);
-                    });
-                }
-            }, "wiki-inspect");
-            worker.setDaemon(true);
-            worker.start();
-        });
+        inspectBtn.setOnAction(e -> runInspect(pathField, summaryLabel, table, spinner, inspectBtn, reindexBtn));
+        reindexBtn.setOnAction(e -> runReindex(pathField, summaryLabel, table, spinner, inspectBtn, reindexBtn));
 
         stage.setScene(SceneFactory.create(root, 700, 480));
         stage.showAndWait();
@@ -184,14 +167,98 @@ public class WikiIndexStatusDialog {
         return table;
     }
 
-    private static String buildSummary(WorkspaceIndexMetadata meta) {
-        long current    = meta.count(PageIndexState.CURRENT);
-        long stale      = meta.count(PageIndexState.STALE);
-        long notIndexed = meta.count(PageIndexState.NOT_INDEXED);
-        long orphaned   = meta.count(PageIndexState.ORPHANED);
-        long empty      = meta.count(PageIndexState.EMPTY);
-        return String.format("총 %d 페이지 — 최신: %d, 갱신 필요: %d, 미색인: %d, 빈 파일: %d, 고아: %d",
-                meta.pages().size(), current, stale, notIndexed, empty, orphaned);
+    private void runInspect(TextField pathField, Label summaryLabel, TableView<RowItem> table,
+                            ProgressIndicator spinner, Button inspectBtn, Button reindexBtn) {
+        Path workspace = validateWorkspace(pathField.getText().trim(), summaryLabel);
+        if (workspace == null) return;
+
+        setBusy(summaryLabel, spinner, inspectBtn, reindexBtn, "조회 중...");
+        table.getItems().clear();
+
+        Thread worker = new Thread(() -> {
+            try {
+                WikiIndexStatusWorkflow.InspectionOutcome outcome =
+                        WikiIndexStatusWorkflow.inspect(indexOperations, workspace);
+                List<RowItem> rows = outcome.metadata().pages().stream()
+                        .map(RowItem::from)
+                        .toList();
+                Platform.runLater(() -> {
+                    table.getItems().setAll(rows);
+                    summaryLabel.setText(outcome.summary());
+                    clearBusy(spinner, inspectBtn, reindexBtn);
+                });
+            } catch (SQLException ex) {
+                Platform.runLater(() -> {
+                    summaryLabel.setText("조회 실패: " + ex.getMessage());
+                    clearBusy(spinner, inspectBtn, reindexBtn);
+                });
+            }
+        }, "wiki-inspect");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void runReindex(TextField pathField, Label summaryLabel, TableView<RowItem> table,
+                            ProgressIndicator spinner, Button inspectBtn, Button reindexBtn) {
+        Path workspace = validateWorkspace(pathField.getText().trim(), summaryLabel);
+        if (workspace == null) return;
+
+        setBusy(summaryLabel, spinner, inspectBtn, reindexBtn, "재색인 중...");
+        table.getItems().clear();
+
+        Thread worker = new Thread(() -> {
+            try {
+                WikiIndexStatusWorkflow.ReindexOutcome outcome =
+                        WikiIndexStatusWorkflow.reindexAndRefresh(indexOperations, workspace, null);
+                List<RowItem> rows = outcome.refresh().metadata().pages().stream()
+                        .map(RowItem::from)
+                        .toList();
+                Platform.runLater(() -> {
+                    table.getItems().setAll(rows);
+                    summaryLabel.setText(outcome.message() + "\n" + outcome.refresh().summary());
+                    clearBusy(spinner, inspectBtn, reindexBtn);
+                });
+            } catch (SQLException ex) {
+                Platform.runLater(() -> {
+                    summaryLabel.setText("재색인 후 상태 조회 실패: " + ex.getMessage());
+                    clearBusy(spinner, inspectBtn, reindexBtn);
+                });
+            } catch (RuntimeException ex) {
+                Platform.runLater(() -> {
+                    summaryLabel.setText("재색인 실패: " + ex.getMessage());
+                    clearBusy(spinner, inspectBtn, reindexBtn);
+                });
+            }
+        }, "wiki-reindex-dialog");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private static Path validateWorkspace(String dir, Label summaryLabel) {
+        if (dir.isBlank()) {
+            summaryLabel.setText("워크스페이스 경로를 입력하세요.");
+            return null;
+        }
+        Path workspace = Path.of(dir);
+        if (!Files.isDirectory(workspace)) {
+            summaryLabel.setText("유효하지 않은 디렉토리: " + dir);
+            return null;
+        }
+        return workspace;
+    }
+
+    private static void setBusy(Label summaryLabel, ProgressIndicator spinner,
+                                Button inspectBtn, Button reindexBtn, String message) {
+        inspectBtn.setDisable(true);
+        reindexBtn.setDisable(true);
+        spinner.setVisible(true);
+        summaryLabel.setText(message);
+    }
+
+    private static void clearBusy(ProgressIndicator spinner, Button inspectBtn, Button reindexBtn) {
+        spinner.setVisible(false);
+        inspectBtn.setDisable(false);
+        reindexBtn.setDisable(false);
     }
 
     /**

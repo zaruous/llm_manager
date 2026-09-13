@@ -49,7 +49,7 @@ argSpecs:
     label: "벡터 색인 DB 경로"
     type: STRING
     defaultValue: "~/llm-services/wiki-mcp-server/wiki-vector.sqlite"
-    description: "워크스페이스 지정 시 {workspace}/.llm-manager/wiki-vector.sqlite로 자동 변경됩니다."
+    description: "워크스페이스 지정 시 ~/llm-services/wiki-mcp-server/vector/{워크스페이스 ID}/wiki-vector.sqlite로 자동 변경됩니다. ID는 vector/workspaces.json에서 관리됩니다."
   - name: vec0-path
     flag: --vec0-path
     label: "sqlite-vec 라이브러리 경로"
@@ -112,10 +112,12 @@ groovyScript: |
   def vec0File  = (os == 'windows') ? (nativeDir + '/vec0.dll') : (nativeDir + '/vec0.so')
   service.argValues['vec0-path'] = vec0File
 
-  // db-path: 워크스페이스가 설정된 경우 워크스페이스 기준, 아니면 installDir 기준 기본값 사용
+  // db-path: 중앙 벡터 저장소 ~/llm-services/wiki-mcp-server/vector/<워크스페이스 ID>/ 기준.
+  // ID 발급 규칙(workspaces.json)을 이중 구현하지 않도록 앱의 resolveDbFile()을 직접 호출한다.
   def ws = service.argValues?.get('workspace')
   if (ws != null && !ws.isBlank()) {
-    service.argValues['db-path'] = new File(new File(ws, '.llm-manager'), 'wiki-vector.sqlite').absolutePath
+    def dbFile = org.kyj.llmmanager.service.WikiVectorRepository.resolveDbFile(java.nio.file.Paths.get(ws))
+    service.argValues['db-path'] = dbFile.toString()
   } else {
     service.argValues['db-path'] = new File(service.installDir, 'wiki-vector.sqlite').absolutePath
   }

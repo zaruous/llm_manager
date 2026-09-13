@@ -1,0 +1,15 @@
+interface:
+  display_name: "Wiki 대화 수집"
+  short_description: "현재 LLM 대화를 선별·정제해 Wiki 원본으로 수집"
+  default_prompt: "Use $wiki-ingest-conversation to ingest the current conversation into the Wiki."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "wiki-mcp"
+      description: "Stores sanitized conversation sources and runs the Cursor Wiki ingest workflow."
+      transport: "streamable_http"
+      url: "http://localhost:18090/mcp"
+
+policy:
+  allow_implicit_invocation: false

@@ -24,13 +24,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 위키 페이지 청크의 임베딩 벡터를 SQLite + sqlite-vec(vec0 가상 테이블)로 관리한다.
  *
  * Connection pool size를 1로 고정해 vec0 확장 로딩을 한 번만 수행한다.
- * 워크스페이스의 {@code .llm-manager/wiki-vector.sqlite}에 DB 파일을 생성한다.
+ * DB 파일은 중앙 벡터 저장소 {@code ~/llm-services/wiki-mcp-server/vector/<워크스페이스 ID>/}에
+ * 생성한다. ID는 {@link WikiVectorWorkspaceRegistry}가 workspaces.json에서 발급·관리한다.
+ * 구버전 위치({@code <workspace>/.llm-manager/})에 DB가 있으면 첫 오픈 시 자동 이동한다.
  */
 public class WikiVectorRepository implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(WikiVectorRepository.class);
 
     private static final String DB_FILE_NAME = "wiki-vector.sqlite";
+
+    /** 중앙 벡터 저장소 루트를 재지정하는 시스템 프로퍼티 (테스트 격리용). */
+    static final String VECTOR_DIR_PROP = "llm.wikiVectorDir";
+
+    /** DB 디렉토리가 어느 워크스페이스의 색인인지 기록하는 마커 파일명. 폴더명 충돌 감지용. */
+    private static final String MARKER_FILE_NAME = "workspace-path.txt";
 
     /** vec0 확장 로딩 완료 플래그. pool size=1이므로 한 번만 처리하면 된다. */
     private final AtomicBoolean vecLoaded = new AtomicBoolean(false);
@@ -46,14 +54,67 @@ public class WikiVectorRepository implements Closeable {
      */
     public WikiVectorRepository(Path workspace, String vec0Path) {
         this.vec0Path = vec0Path;
-        Path dbFile = workspace.resolve(".llm-manager").resolve(DB_FILE_NAME)
-                .toAbsolutePath().normalize();
+        Path dbFile = resolveDbFile(workspace);
         try {
             Files.createDirectories(dbFile.getParent());
+            migrateLegacyDb(workspace, dbFile);
+            checkWorkspaceMarker(workspace, dbFile.getParent());
         } catch (IOException e) {
             throw new IllegalStateException("벡터 DB 디렉토리 생성 실패: " + dbFile.getParent(), e);
         }
         this.dataSource = createDataSource(dbFile);
+    }
+
+    /**
+     * 워크스페이스의 벡터 DB 파일 경로를 중앙 저장소 규칙으로 반환한다.
+     * 규칙: {@code ~/llm-services/wiki-mcp-server/vector/<워크스페이스 ID>/wiki-vector.sqlite}.
+     * ID는 {@link WikiVectorWorkspaceRegistry}가 발급하며, 처음 조회하는 워크스페이스는
+     * 이 호출에서 레지스트리에 신규 등록된다. wiki-mcp.yml groovyScript가 이 메서드를
+     * 직접 호출하고, server.py 폴백도 동일한 규칙을 구현한다.
+     *
+     * @param workspace 위키 워크스페이스 루트 경로
+     * @return 벡터 DB 파일 절대 경로
+     */
+    public static Path resolveDbFile(Path workspace) {
+        String id = WikiVectorWorkspaceRegistry.resolveId(workspace);
+        return WikiVectorWorkspaceRegistry.baseDir()
+                .resolve(id).resolve(DB_FILE_NAME).toAbsolutePath().normalize();
+    }
+
+    /**
+     * 구버전 위치({@code <workspace>/.llm-manager/wiki-vector.sqlite})의 DB를
+     * 중앙 저장소로 1회 이동한다. 중앙 저장소에 이미 DB가 있으면 아무것도 하지 않는다.
+     */
+    private static void migrateLegacyDb(Path workspace, Path dbFile) throws IOException {
+        Path legacy = workspace.toAbsolutePath().normalize()
+                .resolve(".llm-manager").resolve(DB_FILE_NAME);
+        if (Files.exists(dbFile) || !Files.exists(legacy)) return;
+        Files.move(legacy, dbFile);
+        log.info("구버전 벡터 DB를 중앙 저장소로 이동: {} → {}", legacy, dbFile);
+    }
+
+    /**
+     * DB 디렉토리의 워크스페이스 마커를 검사·기록한다.
+     * 폴더명이 같은 다른 워크스페이스가 동일 디렉토리를 쓰면 색인이 뒤섞이므로 경고를 남긴다.
+     */
+    private static void checkWorkspaceMarker(Path workspace, Path dbDir) {
+        Path marker = dbDir.resolve(MARKER_FILE_NAME);
+        String wsPath = workspace.toAbsolutePath().normalize().toString();
+        try {
+            if (Files.exists(marker)) {
+                String recorded = Files.readString(marker).strip();
+                if (!recorded.equals(wsPath)) {
+                    log.warn("벡터 DB 디렉토리 {}는 다른 워크스페이스({})의 색인입니다. "
+                            + "폴더명이 겹치면 색인이 뒤섞일 수 있습니다. 현재 워크스페이스: {}",
+                            dbDir, recorded, wsPath);
+                }
+            } else {
+                Files.writeString(marker, wsPath);
+            }
+        } catch (IOException e) {
+            // 마커는 진단용이므로 실패해도 DB 사용을 막지 않는다
+            log.debug("워크스페이스 마커 처리 실패: {}", marker, e);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────

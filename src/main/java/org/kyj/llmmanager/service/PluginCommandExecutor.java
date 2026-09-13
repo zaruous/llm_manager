@@ -101,7 +101,10 @@ public class PluginCommandExecutor {
                 return PluginCommandResult.error("작업 디렉토리가 존재하지 않습니다: " + cwdPath);
             }
         }
+        boolean directWikiImport = "wiki.ingest".equals(command.getId())
+                && "true".equalsIgnoreCase(request.options().get("directVectorImport"));
         for (String env : command.getRequires().getEnv()) {
+            if (directWikiImport && "CURSOR_API_KEY".equals(env)) continue;
             String value = System.getenv(env);
             if (value == null || value.isBlank()) {
                 return PluginCommandResult.error("필수 환경변수가 없습니다: " + env);
@@ -168,6 +171,11 @@ public class PluginCommandExecutor {
             return reindexWorkspace(workspace, onOutput);
         }
 
+        if ("wiki.ingest".equals(command.getId())
+                && "true".equalsIgnoreCase(request.options().get("directVectorImport"))) {
+            return runDirectObsidianImport(workspace, request, onOutput);
+        }
+
         LoadedPlugin plugin = pluginManager.findPlugin(pluginId);
         if (plugin == null) {
             return PluginCommandResult.error("플러그인 디렉토리를 찾을 수 없습니다: " + pluginId);
@@ -228,6 +236,42 @@ public class PluginCommandExecutor {
         }
         triggerAsyncReindex(workspace, onOutput);
         return PluginCommandResult.info("벡터 재색인을 백그라운드에서 시작했습니다. 출력창을 확인해 주세요.");
+    }
+
+    /**
+     * 옵시디언 링크 구조가 이미 있는 markdown 목록을 source wrapper + 벡터 색인으로 직접 적재한다.
+     */
+    private PluginCommandResult runDirectObsidianImport(Path workspace,
+                                                        PluginCommandRequest request,
+                                                        Consumer<String> onOutput) {
+        List<Path> files = request.prompt() == null ? List.of()
+                : request.prompt().lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .map(Path::of)
+                .map(Path::toAbsolutePath)
+                .map(Path::normalize)
+                .toList();
+        if (files.isEmpty()) {
+            return PluginCommandResult.error("직접 적재할 markdown 경로가 없습니다.");
+        }
+
+        WikiIndexService wikiIndexService = org.kyj.llmmanager.AppContext.getInstance().getWikiIndexService();
+        if (wikiIndexService == null) {
+            return PluginCommandResult.error("WikiIndexService를 찾을 수 없습니다.");
+        }
+
+        try {
+            WikiDirectImportService.ImportResult result = new WikiDirectImportService(
+                    wikiIndexService::indexWorkspace).importMarkdownFiles(workspace, files, onOutput);
+            if (result.importedCount() == 0) {
+                return PluginCommandResult.error("직접 적재 가능한 markdown 파일이 없습니다.");
+            }
+            return PluginCommandResult.info("옵시디언 직접 적재 완료: source "
+                    + result.importedCount() + "개, 건너뜀 " + result.skippedCount() + "개");
+        } catch (Exception e) {
+            return PluginCommandResult.error("옵시디언 직접 적재 실패: " + e.getMessage());
+        }
     }
 
     /**
