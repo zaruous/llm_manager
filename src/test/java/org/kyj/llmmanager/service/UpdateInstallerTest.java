@@ -47,6 +47,9 @@ class UpdateInstallerTest {
         assertTrue(s.contains("findstr.exe\" /C:\" %APP_PID% \""), "PID 컬럼은 공백 패딩으로 매칭한다");
         assertTrue(s.contains("set \"APP_PID=4242\""));
         assertTrue(s.contains("ping.exe\" -n 2 127.0.0.1"));
+        // 앱(JVM 자식) 종료 직후 jpackage 런처(부모)가 exe 를 놓을 시간 — 복사 전 2초 유예
+        assertTrue(s.contains(":appgone\r\necho [%TIME%] app exited after %WAITED%s >> \"%LOG%\"\r\n"
+                + "\"%SYS%\\ping.exe\" -n 3 127.0.0.1 >nul\r\n"), "appgone 직후 2초 유예가 있어야 한다");
     }
 
     @Test

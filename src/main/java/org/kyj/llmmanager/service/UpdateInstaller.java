@@ -169,6 +169,8 @@ public final class UpdateInstaller {
           .append("\r\n")
           .append(":appgone\r\n")
           .append("echo [%TIME%] app exited after %WAITED%s >> \"%LOG%\"\r\n")
+          // jpackage 런처(부모 LLMManager.exe)는 JVM 자식이 끝난 직후 종료된다 — exe 핸들을 놓을 시간을 2초 준다
+          .append("\"%SYS%\\ping.exe\" -n 3 127.0.0.1 >nul\r\n")
           // jpackage 가 LLMManager.exe 를 읽기 전용으로 만들어 덮어쓰기가 막힐 수 있다
           .append("\"%SYS%\\attrib.exe\" -R \"%INSTALL_DIR%\\*\" /S /D >> \"%LOG%\" 2>&1\r\n")
           // /IS /IT: 시간·크기가 같거나 속성만 다른 파일도 덮어쓴다. /MIR·/PURGE 금지 — app/service-packs 사용자 데이터 보존
@@ -198,10 +200,13 @@ public final class UpdateInstaller {
     }
 
     /**
-     * 스크립트 파일을 쓰고, 앱과 분리된 새 콘솔에서 실행한다.
-     * {@code start /B} 가 아닌 새 콘솔(/MIN)을 쓰고 표준 입출력을 모두 끊어, 부모 JVM 이 종료된 뒤
-     * 상속 파이프에 쓰다가 죽는 경로를 배제한다. 중간 cmd 는 즉시 종료되므로 스크립트는 앱 프로세스
-     * 트리에서 고아가 되어 {@code taskkill /T} 로 앱 트리를 죽여도 따라 죽지 않는다.
+     * 스크립트 파일을 쓰고, 앱 프로세스의 Job Object 밖에서 실행한다.
+     *
+     * <p>jpackage 의 LLMManager.exe 런처는 자기 자신을 자식으로 재실행하고 KILL_ON_JOB_CLOSE Job 으로 묶는다.
+     * {@code cmd /c start} 로 분리한 프로세스도 그 Job 을 상속하므로 앱(자식)이 종료되고 런처(부모)가 뒤따라
+     * 종료되는 순간 스크립트까지 함께 죽는다 — 2026-09-14 v1.2.2 업데이트에서 로그 3줄만 남기고 사라진 원인.
+     * WMI {@code Win32_Process.Create} 는 WmiPrvSE 가 프로세스를 생성하므로 호출자의 Job 을 상속하지 않는다.
+     * WMI 를 쓸 수 없는 환경에서만 {@code start} 방식으로 폴백한다.
      *
      * @param batPath 스크립트를 저장할 경로
      * @param script  {@link #buildScript} 결과
@@ -210,6 +215,50 @@ public final class UpdateInstaller {
     public static void launchDetached(Path batPath, String script) throws IOException {
         Files.createDirectories(batPath.getParent());
         Files.writeString(batPath, script, StandardCharsets.UTF_8);
+        if (launchViaWmi(batPath) != 0) {
+            launchViaStart(batPath);
+        }
+    }
+
+    /**
+     * WMI 로 {@code cmd.exe /c "<bat>"} 를 생성한다. 스크립트는 인용부호 문제를 피하기 위해
+     * {@code -EncodedCommand}(UTF-16LE Base64) 로 전달하고, 창은 최소화(SW_SHOWMINNOACTIVE=7)로 띄운다.
+     *
+     * @param batPath 실행할 스크립트
+     * @return {@code Win32_Process.Create} 의 ReturnValue (0 = 성공). PowerShell 호출 자체가 실패·지연되면 -1
+     */
+    static int launchViaWmi(Path batPath) {
+        String cmdLine = "cmd.exe /c \"" + batPath + "\"";
+        String ps = "$si = ([wmiclass]'Win32_ProcessStartup').CreateInstance(); $si.ShowWindow = 7; "
+                  + "$r = ([wmiclass]'Win32_Process').Create('" + cmdLine.replace("'", "''") + "', $null, $si); "
+                  + "exit [int]$r.ReturnValue";
+        String encoded = java.util.Base64.getEncoder().encodeToString(ps.getBytes(java.nio.charset.StandardCharsets.UTF_16LE));
+        try {
+            Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                            "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
+                    .redirectInput(ProcessBuilder.Redirect.from(new File("NUL")))
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+            // WMI 서비스가 멈춰 있으면 무한 대기할 수 있어 상한을 둔다
+            if (!p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return -1;
+            }
+            return p.exitValue();
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /**
+     * 폴백: 새 콘솔(/MIN)로 띄우고 표준 입출력을 끊는다. {@code taskkill /T} 트리 kill 은 피하지만
+     * 호출자의 Job Object 는 상속하므로 jpackage 런처 아래에서는 런처 종료와 함께 죽을 수 있다.
+     *
+     * @param batPath 실행할 스크립트
+     * @throws IOException 프로세스 기동 실패 시
+     */
+    static void launchViaStart(Path batPath) throws IOException {
         ProcessBuilder pb = new ProcessBuilder(
                 "cmd.exe", "/c", "start", "\"\"", "/MIN", "cmd.exe", "/c", batPath.toString());
         pb.redirectInput(ProcessBuilder.Redirect.from(new File("NUL")));
