@@ -23,6 +23,8 @@ tasks.withType(Javadoc).configureEach {
 
 // app.properties의 ${version} 플레이스홀더를 빌드 시점에 실제 버전으로 치환
 processResources {
+    // expand() 의 클로저 값은 자동 추적되지 않아 버전만 바꾸면 UP-TO-DATE 로 옛 app.properties 가 재사용된다
+    inputs.property('version', project.version)
     filesMatching('**/app.properties') {
         expand(version: project.version)
     }
