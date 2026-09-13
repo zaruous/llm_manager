@@ -31,6 +31,8 @@ import org.kyj.llmmanager.ui.dialog.WikiBrowserDialog;
 import org.kyj.llmmanager.ui.dialog.WikiIngestDialog;
 import org.kyj.llmmanager.ui.dialog.WikiQueryDialog;
 import org.kyj.llmmanager.service.UpdateChecker;
+import org.kyj.llmmanager.service.UpdateInstaller;
+import org.kyj.llmmanager.service.UpdateOutcome;
 import javafx.concurrent.Task;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -268,6 +270,25 @@ public class MainController implements Initializable {
         systemStatsTimer.setCycleCount(Timeline.INDEFINITE);
         systemStatsTimer.play();
         updateSystemStats();  // 즉시 초기 표시
+
+        reportPendingUpdateOutcome();
+    }
+
+    /**
+     * 지난 업데이트 시도의 결과 마커가 있으면 성공·실패를 사용자에게 알린다.
+     * 마커는 읽는 즉시 지워지므로 알림은 재기동 후 한 번만 뜬다.
+     */
+    private void reportPendingUpdateOutcome() {
+        Platform.runLater(() -> {
+            String current = UpdateChecker.fromProperties().getCurrentVersion();
+            UpdateOutcome.consume(UpdateInstaller.workDir(), current).ifPresent(r -> {
+                boolean ok = r.kind() == UpdateOutcome.Kind.SUCCESS;
+                Alert alert = new Alert(ok ? Alert.AlertType.INFORMATION : Alert.AlertType.WARNING, r.message());
+                alert.setTitle("업데이트");
+                alert.setHeaderText(ok ? "업데이트 완료" : "업데이트 결과 확인 필요");
+                alert.show();
+            });
+        });
     }
 
     /**
@@ -1130,7 +1151,7 @@ public class MainController implements Initializable {
                 new Alert(Alert.AlertType.INFORMATION,
                         "현재 최신 버전입니다 (v" + checker.getCurrentVersion() + ").").showAndWait();
             } else {
-                new UpdateInstallDialog(owner, info.get(), checker.getCurrentVersion()).show();
+                new UpdateInstallDialog(owner, info.get(), checker.getCurrentVersion(), ctx).show();
             }
         });
         task.setOnFailed(e ->

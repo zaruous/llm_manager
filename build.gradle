@@ -407,6 +407,7 @@ List<String> buildJpackageArgs(String type, Project proj) {
         def os = org.gradle.internal.os.OperatingSystem.current()
         if (os.windows) {
             cmd += [
+                '--win-per-user-install',
                 '--win-dir-chooser',
                 '--win-menu',
                 '--win-shortcut',
@@ -446,6 +447,9 @@ List<String> buildJpackageInstallerArgs(String type, Project proj) {
     def os = org.gradle.internal.os.OperatingSystem.current()
     if (os.windows) {
         cmd += [
+            // 사용자 프로필(%LOCALAPPDATA%)에 설치 — 자동 업데이트가 관리자 권한 없이 설치본을 덮어쓸 수 있어야 한다.
+            // Program Files 에 설치하면 robocopy 가 ACCESS DENIED 로 실패한다.
+            '--win-per-user-install',
             '--win-dir-chooser',
             '--win-menu',
             '--win-shortcut',

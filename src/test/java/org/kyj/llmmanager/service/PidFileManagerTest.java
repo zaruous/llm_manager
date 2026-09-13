@@ -43,7 +43,8 @@ class PidFileManagerTest {
     void resolve_withInstallDir_placedInsideInstallDir(@TempDir Path dir) {
         ServiceDefinition def = defWithInstallDir(dir.toString());
         Path resolved = PidFileManager.resolve(def);
-        assertEquals(dir.resolve(".llm-manager.pid"), resolved);
+        // 2026-08-11 부터 파일명에 서비스 ID를 포함한다 (같은 installDir 을 공유하는 서비스 간 충돌 방지)
+        assertEquals(dir.resolve(".llm-manager-test-svc.pid"), resolved);
     }
 
     @Test

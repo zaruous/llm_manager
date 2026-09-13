@@ -156,6 +156,23 @@ LLMManager/
 > 참고: 현재 master는 `WikiPreprocessor`·`WikiIndexStatusDialog` 클래스가 커밋되지 않아
 > 컴파일이 깨져 있다 (wiki-vector-mcp 머지 시 누락 추정). 위 수정 파일들은 스텁으로 별도 컴파일 검증함.
 
+### 자동 업데이트 실패 수정 (2026-09-14, v1.2.1+)
+
+- **원인**: 업데이트 스크립트(update.bat)가 앱 종료 과정의 `taskkill /F /T`에 맞아 죽었다. ShutdownHook의
+  `stopAllSync()`가 PID 파일의 낡은 PID(Windows는 PID를 빠르게 재사용)를 검증 없이 kill하고,
+  `timeout /t 5`는 콘솔 없는 프로세스에서 즉시 실패해 유예가 없었으며, 실패는 어디에도 보고되지 않았다.
+- `UpdateInstaller`: zip 해제·엔트리 수 검증을 Java에서 수행. 스크립트는 `%SystemRoot%\System32` 절대 경로
+  도구로 앱 PID 소멸 폴링 → `attrib -R` → robocopy(exit≥8 실패) → 결과 마커 → 재기동. `start "" /MIN` +
+  표준 입출력 분리로 부모 JVM 종료 후 파이프 사망을 배제. `%~dp0` 폴백·`/PURGE` 사용 금지.
+- `UpdateInstallDialog`: **서비스 정리(`AppContext.shutdown()`) → 스크립트 기동 → 종료** 순서.
+  정리 중 taskkill이 도는 동안 업데이터가 존재하면 재사용된 PID로 맞을 수 있다.
+- `PidFileManager.check()`: PID 파일 2행에 `start=<epochMillis>`를 기록하고 시작 시각(구버전 파일은 mtime)을
+  대조해 재배정된 PID를 `STALE`로 걸러낸다. `ProcessManager`는 `LIVE_MATCH`일 때만 kill, `stopAllSync`는 1회만.
+- `UpdateOutcome`: 재기동 시 성공/실패/미완/버전불일치를 한 번 알린다. 로그 `%TEMP%\llm-manager-update\update.log`.
+- 인스톨러는 `--win-per-user-install` — Program Files에 설치하면 자동 업데이트가 권한 문제로 실패한다.
+- 검증: `UpdateInstallerTest`·`UpdateOutcomeTest`·`PidFileManagerCheckTest`(실제 프로세스로 STALE 판정) +
+  v1.0.5 설치본 사본을 실제 1.2.0 zip으로 교체하는 헤드리스 E2E 통과.
+
 ---
 
 ## 주석 작성 규칙 (Java)
