@@ -89,13 +89,21 @@ public class ProcessManager {
      * @return 살아 있는 프로세스를 감지해 연결했으면 true
      */
     public boolean restoreFromPidFile(ServiceInstance instance) {
-        OptionalLong savedPid = PidFileManager.read(instance.getDefinition());
+        ServiceDefinition def = instance.getDefinition();
+        OptionalLong savedPid = PidFileManager.read(def);
         if (savedPid.isEmpty()) return false;
 
         long pid = savedPid.getAsLong();
-        boolean alive = ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
-        if (!alive) {
-            PidFileManager.delete(instance.getDefinition());
+        // PID가 살아있다는 것만으로 연결하면 재배정된 PID(무관한 프로그램)를 서비스로 오인하고,
+        // 종료 시 그 프로그램을 taskkill하게 된다. 시작 시각까지 일치할 때만 복원한다.
+        PidFileManager.PidCheck check = PidFileManager.check(def);
+        if (check != PidFileManager.PidCheck.LIVE_MATCH) {
+            if (check != PidFileManager.PidCheck.DEAD) {
+                log.warn("PID file for {} ignored: pid={} check={}", def.getName(), pid, check);
+                logService.addSystemLog(instance,
+                        "PID 파일(" + pid + ")이 현재 프로세스와 일치하지 않아 무시합니다 (" + check + ")");
+            }
+            PidFileManager.delete(def);
             return false;
         }
 
@@ -422,6 +430,15 @@ public class ProcessManager {
                 long pid = savedPid.getAsLong();
                 new Thread(() -> {
                     try {
+                        // 재배정된 PID면 무관한 프로그램을 죽이게 되므로 시작 시각까지 일치할 때만 종료한다
+                        PidFileManager.PidCheck check = PidFileManager.check(def);
+                        if (check != PidFileManager.PidCheck.LIVE_MATCH) {
+                            logService.addSystemLog(instance,
+                                    "PID 파일(" + pid + ")이 실행 중인 서비스와 일치하지 않아 종료를 건너뜁니다 (" + check + ")");
+                            PidFileManager.delete(def);
+                            setStatus(instance, ServiceStatus.STOPPED);
+                            return;
+                        }
                         logService.addSystemLog(instance, "고아 프로세스 종료 시도 (PID=" + pid + ")");
                 if (PlatformUtil.isWindows()) {
                     Runtime.getRuntime().exec(new String[]{"taskkill", "/F", "/T", "/PID", String.valueOf(pid)})
@@ -521,11 +538,21 @@ public class ProcessManager {
     }
 
     /**
+     * stopAllSync 완료 여부. AppContext.shutdown()과 JVM ShutdownHook이 연달아 호출하는데,
+     * 두 번째 taskkill은 이미 죽은 PID를 겨냥하므로 그 사이 재배정된 프로세스(예: 업데이트 스크립트)를
+     * 죽일 수 있다. 한 번 완료되면 이후 호출은 no-op.
+     */
+    private final java.util.concurrent.atomic.AtomicBoolean stopAllDone =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /**
      * 실행 중인 모든 서비스를 호출 스레드에서 동기적으로 종료한다.
      * JVM ShutdownHook에서 호출 — 새 스레드를 생성하면 종료 전에 완료가 보장되지 않으므로
      * 블로킹 방식으로 직접 처리한다. UI 업데이트(Platform.runLater)는 수행하지 않는다.
+     * 한 번 정상 완료된 뒤의 재호출은 아무 일도 하지 않는다 ({@link #stopAllDone}).
      */
     public void stopAllSync() {
+        if (stopAllDone.get()) return;
         for (ServiceInstance inst : instances.values()) {
             if (inst.getStatus() != ServiceStatus.RUNNING
                     && inst.getStatus() != ServiceStatus.STARTING) continue;
@@ -534,6 +561,11 @@ public class ProcessManager {
             try {
                 long pid;
                 if (process != null) {
+                    // 이미 끝난 프로세스의 PID는 재배정됐을 수 있다 — taskkill하지 않고 파일만 정리
+                    if (!process.isAlive()) {
+                        PidFileManager.delete(def);
+                        continue;
+                    }
                     // PID 파일과 현재 프로세스 PID 일치 검증
                     OptionalLong savedPid = PidFileManager.read(def);
                     if (savedPid.isPresent() && savedPid.getAsLong() != process.pid()) {
@@ -542,9 +574,16 @@ public class ProcessManager {
                     }
                     pid = process.pid();
                 } else {
-                    // 고아 프로세스: PID 파일에서 PID 조회
+                    // 고아 프로세스: 시작 시각까지 일치할 때만 종료 — 재배정된 PID면 무관한 프로그램을 죽인다
                     OptionalLong savedPid = PidFileManager.read(def);
                     if (savedPid.isEmpty()) continue;
+                    PidFileManager.PidCheck check = PidFileManager.check(def);
+                    if (check != PidFileManager.PidCheck.LIVE_MATCH) {
+                        log.warn("ShutdownHook: skip kill for {} pid={} ({})",
+                                def.getName(), savedPid.getAsLong(), check);
+                        PidFileManager.delete(def);
+                        continue;
+                    }
                     pid = savedPid.getAsLong();
                 }
 
