@@ -162,8 +162,13 @@ LLMManager/
   `stopAllSync()`가 PID 파일의 낡은 PID(Windows는 PID를 빠르게 재사용)를 검증 없이 kill하고,
   `timeout /t 5`는 콘솔 없는 프로세스에서 즉시 실패해 유예가 없었으며, 실패는 어디에도 보고되지 않았다.
 - `UpdateInstaller`: zip 해제·엔트리 수 검증을 Java에서 수행. 스크립트는 `%SystemRoot%\System32` 절대 경로
-  도구로 앱 PID 소멸 폴링 → `attrib -R` → robocopy(exit≥8 실패) → 결과 마커 → 재기동. `start "" /MIN` +
-  표준 입출력 분리로 부모 JVM 종료 후 파이프 사망을 배제. `%~dp0` 폴백·`/PURGE` 사용 금지.
+  도구로 앱 PID 소멸 폴링 → 2초 유예 → `attrib -R` → robocopy(exit≥8 실패) → 결과 마커 → 재기동.
+  `%~dp0` 폴백·`/PURGE` 사용 금지.
+- **스크립트 기동은 WMI `Win32_Process.Create`** (v1.2.3). jpackage `LLMManager.exe` 런처는 자기 자신을
+  자식으로 재실행하고 그 자식(앱 JVM)을 `KILL_ON_JOB_CLOSE` Job에 넣는다 — `IsProcessInJob` 실측: 부모 false,
+  자식 true. `cmd /c start`로 분리한 프로세스도 이 Job을 상속해 앱 종료 순간 함께 죽는다 (v1.2.2 업데이트에서
+  로그 3줄만 남기고 사라진 원인). WMI로 만든 프로세스는 WmiPrvSE 자식이라 Job 밖이다. WMI 불가 시
+  `start` 폴백. 창은 최소화(ShowWindow=7). 인용부호 문제를 피하기 위해 PowerShell `-EncodedCommand` 사용.
 - `UpdateInstallDialog`: **서비스 정리(`AppContext.shutdown()`) → 스크립트 기동 → 종료** 순서.
   정리 중 taskkill이 도는 동안 업데이터가 존재하면 재사용된 PID로 맞을 수 있다.
 - `PidFileManager.check()`: PID 파일 2행에 `start=<epochMillis>`를 기록하고 시작 시각(구버전 파일은 mtime)을
