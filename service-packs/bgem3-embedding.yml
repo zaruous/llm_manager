@@ -97,7 +97,7 @@ groovyScript: |
   if (useCuda) {
       service.installCommands = [
           "pip install -r requirements.txt",
-          "pip install torch>=2.6.0 --index-url https://download.pytorch.org/whl/${cudaVer}"
+          "pip install torch>=2.6.0 --index-url https://download.pytorch.org/whl/${cudaVer}".toString()
       ]
       // CUDA 환경이면 fp16 기본값 true
       def fp16Spec = service.argSpecs.find { it.name == 'fp16' }
