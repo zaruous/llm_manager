@@ -138,7 +138,7 @@ LLMManager/
   REPLACE로 인한 id 재발급·고아 임베딩을 방지. 재연결된 청크의 벡터는 옛 헤더 기준(드리프트 감수) —
   본문이 바뀌는 다음 편집에서 자연 갱신.
 
-**배포 주의사항**: jpackage는 번들 JRE에서 `java.exe`를 제거한다. `build.gradle`의 `copyJavaExeToRuntime()`이 빌드 JDK에서 `runtime/bin/`으로 복사한다. WebView 사용 시 `--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED`이 applicationDefaultJvmArgs·startScripts·jpackage 세 곳에 모두 필요하다.
+**배포 주의사항**: jpackage는 번들 JRE에서 `java.exe`를 제거한다. `build.gradle`의 `copyJavaExeToRuntime()`이 빌드 JDK에서 `runtime/bin/`으로 복사한다. WebView 사용 시 `--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED`이 applicationDefaultJvmArgs·startScripts·jpackage 세 곳에 모두 필요하다. 같은 세 곳에 `-Djava.net.useSystemProxies=true`도 필요하다 — 없으면 앱의 HttpClient가 Windows 프록시 설정을 무시하고 직접 연결해, 사내망에서 JAR 다운로드·릴리즈 조회가 `Permission denied: getsockopt`로 실패한다 (v1.2.5).
 
 ### sql-gen-mcp 중복 등록·JAR 버전 인식 버그 수정 (2026-08-11)
 
