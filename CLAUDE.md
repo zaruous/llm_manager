@@ -156,6 +156,20 @@ LLMManager/
 > 참고: 현재 master는 `WikiPreprocessor`·`WikiIndexStatusDialog` 클래스가 커밋되지 않아
 > 컴파일이 깨져 있다 (wiki-vector-mcp 머지 시 누락 추정). 위 수정 파일들은 스텁으로 별도 컴파일 검증함.
 
+### sql-gen-mcp 다운로드 실패 우회·직접 배치 JAR 인식 (2026-09-17)
+
+- `-Djava.net.useSystemProxies=true`(v1.2.5) 이후에도 사내 PC에서 `Permission denied: getsockopt`가
+  계속되는 환경이 있다 — 브라우저는 같은 URL을 받을 수 있으므로 java.exe 단위 방화벽/보안 정책 차단으로
+  추정되며 앱 설정으로는 해결 불가. 다운로드 실패 시 `JarDownloader.failureMessage()`가 원인과 함께
+  브라우저 직접 다운로드 URL·JAR을 넣을 설치 경로를 안내한다 (설정 다이얼로그 2곳 + 설치 탭).
+- **직접 넣어 둔 JAR 인식**: `MainController.syncInstallStatus()`가 앱 시작뿐 아니라 서비스 추가·수정
+  직후와 서비스 선택 시에도 `isInstalled`를 재검사해 NOT_INSTALLED → INSTALLED로 올린다. 이전에는 앱
+  시작 시에만 검사해, 추가 직후에는 재시작 전까지 시작 버튼이 비활성이었다.
+- **버전 붙은 asset 이름 보정**: 설정의 `-jar sql-gen-mcp.jar`가 없고 같은 접두어의 JAR
+  (`sql-gen-mcp-1.1.0.jar`)이 설치 경로에 정확히 하나면 `InstallationService.findAlternateJar()`로 찾아
+  startCommand를 갱신·저장한다 (후보 0개·2개 이상·접두어 불일치면 손대지 않음). 갱신은 서비스 로그에 남긴다.
+- `withJarFileName`은 `CommandBuilder`로 이동 (`jarFileName` 추가).
+
 ### 자동 업데이트 실패 수정 (2026-09-14, v1.2.1+)
 
 > 상세 분석·검증 기록: [docs/done/자동업데이트-실패-원인분석-및-수정.md](docs/done/자동업데이트-실패-원인분석-및-수정.md)

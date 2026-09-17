@@ -69,6 +69,43 @@ public class CommandBuilder {
         return parts;
     }
 
+    /**
+     * startCommand에서 {@code -jar} 다음 토큰(JAR 파일명)을 돌려준다.
+     *
+     * @param startCommand 시작 명령어. null 허용
+     * @return JAR 파일명. {@code -jar} 토큰이 없으면 null
+     */
+    public static String jarFileName(String startCommand) {
+        List<String> tokens = splitCommand(startCommand);
+        for (int i = 0; i < tokens.size() - 1; i++) {
+            if ("-jar".equalsIgnoreCase(tokens.get(i))) return tokens.get(i + 1);
+        }
+        return null;
+    }
+
+    /**
+     * startCommand의 {@code -jar} 다음 토큰을 지정한 JAR 파일명으로 교체한 명령어를 반환한다.
+     * 설치·직접 배치한 JAR이 설정에 등록된 파일명과 다를 때(버전 업데이트 등) 사용한다.
+     *
+     * @param startCommand 원본 시작 명령어
+     * @param jarFileName  교체할 JAR 파일명
+     * @return 교체된 명령어. -jar 토큰이 없거나 이미 같은 파일명이면 null(변경 불필요).
+     */
+    public static String withJarFileName(String startCommand, String jarFileName) {
+        if (startCommand == null || startCommand.isBlank()) return null;
+        List<String> tokens = new ArrayList<>(splitCommand(startCommand));
+        for (int i = 0; i < tokens.size() - 1; i++) {
+            if ("-jar".equalsIgnoreCase(tokens.get(i))) {
+                if (jarFileName.equals(tokens.get(i + 1))) return null;
+                // 공백 포함 파일명은 다시 토큰화될 때 깨지지 않도록 따옴표 처리
+                tokens.set(i + 1, jarFileName.contains(" ")
+                        ? "\"" + jarFileName + "\"" : jarFileName);
+                return String.join(" ", tokens);
+            }
+        }
+        return null;
+    }
+
     private static String unquote(String value) {
         if (value == null || value.length() < 2) {
             return value;

@@ -192,6 +192,29 @@ public class JarDownloader {
         return name;
     }
 
+    /**
+     * 자동 다운로드 실패 시 사용자에게 보여줄 안내문을 만든다.
+     *
+     * <p>사내망 프록시 등으로 앱의 HttpClient 연결이 막혀도(예: {@code Permission denied: getsockopt})
+     * 브라우저로는 같은 URL을 받을 수 있는 경우가 많다. 원인만 보여주면 사용자가 막히므로,
+     * 직접 내려받아 설치 경로에 넣는 우회 절차를 함께 알려준다.
+     *
+     * @param cause     실패 원인 예외
+     * @param url       시도한 다운로드 URL
+     * @param targetDir JAR을 넣어야 할 설치 경로
+     * @return 여러 줄 안내문
+     */
+    public static String failureMessage(Throwable cause, String url, Path targetDir) {
+        String reason = cause.getMessage() != null && !cause.getMessage().isBlank()
+                ? cause.getMessage()
+                : cause.getClass().getSimpleName();
+        return "실패: " + reason + "\n"
+                + "브라우저에서 아래 URL로 직접 내려받을 수 있습니다:\n"
+                + "  " + url + "\n"
+                + "받은 JAR을 설치 경로에 넣고 저장(추가)하면 '설치됨'으로 인식되어 시작할 수 있습니다:\n"
+                + "  " + targetDir;
+    }
+
     private static long toMb(long bytes) {
         return bytes / (1024 * 1024);
     }

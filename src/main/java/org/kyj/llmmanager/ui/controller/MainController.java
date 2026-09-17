@@ -298,13 +298,38 @@ public class MainController implements Initializable {
         instanceList.clear();
         for (ServiceDefinition def : ctx.getServiceRegistry().getAll()) {
             ServiceInstance inst = ctx.getProcessManager().getOrCreate(def);
-            if (ctx.getInstallationService().isInstalled(def)
-                    && inst.getStatus() == ServiceStatus.NOT_INSTALLED) {
-                inst.setStatus(ServiceStatus.INSTALLED);
-            }
+            syncInstallStatus(inst);
             instanceList.add(inst);
         }
         updateStatusBar();
+    }
+
+    /**
+     * 실행 파일이 설치 경로에 실제로 있으면 NOT_INSTALLED 인스턴스를 INSTALLED로 올린다.
+     * 앱 시작 외에 서비스 추가·수정 직후와 서비스 선택 시에도 호출해, 브라우저로 직접 받아
+     * 설치 경로에 넣어 둔 JAR을 앱 재시작 없이 '설치됨'으로 인식하고 시작 버튼을 활성화한다.
+     *
+     * <p>설정된 JAR 이름의 파일은 없고 버전이 붙은 동명 JAR만 하나 있으면(브라우저로 받은
+     * 릴리즈 asset) startCommand를 그 파일명으로 갱신해 저장한다 — 아니면 시작이
+     * 없는 파일을 가리켜 실패한다.
+     *
+     * @param inst 상태를 맞출 인스턴스
+     */
+    private void syncInstallStatus(ServiceInstance inst) {
+        if (inst.getStatus() != ServiceStatus.NOT_INSTALLED) return;
+        ServiceDefinition def = inst.getDefinition();
+        InstallationService installer = ctx.getInstallationService();
+        if (!installer.isInstalled(def)) {
+            Optional<String> alternate = installer.findAlternateJar(def);
+            if (alternate.isEmpty()) return;
+            String updatedCmd = CommandBuilder.withJarFileName(def.getStartCommand(), alternate.get());
+            if (updatedCmd == null) return;
+            def.setStartCommand(updatedCmd);
+            ctx.getServiceRegistry().update(def);
+            ctx.getLogService().addSystemLog(inst,
+                    "설치 경로의 JAR에 맞춰 시작 명령어 갱신: " + updatedCmd);
+        }
+        inst.setStatus(ServiceStatus.INSTALLED);
     }
 
     /**
@@ -688,6 +713,8 @@ public class MainController implements Initializable {
 
     private void refreshInstall() {
         if (selectedInstance == null) return;
+        // 다운로드 실패 후 JAR을 직접 넣어 둔 경우, 서비스를 다시 선택하면 설치됨으로 반영
+        syncInstallStatus(selectedInstance);
         ServiceDefinition def = selectedInstance.getDefinition();
 
         installDirLabel.setText(def.getInstallDir() != null ? def.getInstallDir() : "-");
@@ -817,7 +844,7 @@ public class MainController implements Initializable {
 
                 // 설정에 등록된 JAR 이름과 실제 설치한 파일명이 다르면(버전 업데이트 등)
                 // startCommand를 설치한 파일명으로 갱신 — 아니면 시작·설치 확인이 옛 이름을 바라본다
-                final String updatedCmd = withJarFileName(def.getStartCommand(),
+                final String updatedCmd = CommandBuilder.withJarFileName(def.getStartCommand(),
                         dest.getFileName().toString());
 
                 Platform.runLater(() -> {
@@ -835,7 +862,10 @@ public class MainController implements Initializable {
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
-                    installLogArea.appendText("오류: " + e.getMessage() + "\n");
+                    // 다운로드 실패는 프록시 차단 등으로 브라우저로는 받을 수 있는 경우가 많아 우회 절차를 안내
+                    installLogArea.appendText((url != null
+                            ? JarDownloader.failureMessage(e, url, installDir)
+                            : "오류: " + e.getMessage()) + "\n");
                     progressBar.setProgress(0);
                     installBtn.setDisable(false);
                 });
@@ -896,29 +926,6 @@ public class MainController implements Initializable {
                 File bundled = Path.of("lib", jarName).toFile();
                 if (bundled.exists()) return bundled;
                 break;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * startCommand의 {@code -jar} 다음 토큰을 실제 설치한 JAR 파일명으로 교체한 명령어를 반환한다.
-     * 설치 시 선택한 JAR이 설정에 등록된 파일명과 다를 때(버전 업데이트 등) 사용한다.
-     *
-     * @param startCommand 원본 시작 명령어
-     * @param jarFileName  교체할 JAR 파일명
-     * @return 교체된 명령어. -jar 토큰이 없거나 이미 같은 파일명이면 null(변경 불필요).
-     */
-    private String withJarFileName(String startCommand, String jarFileName) {
-        if (startCommand == null || startCommand.isBlank()) return null;
-        List<String> tokens = new ArrayList<>(CommandBuilder.splitCommand(startCommand));
-        for (int i = 0; i < tokens.size() - 1; i++) {
-            if ("-jar".equalsIgnoreCase(tokens.get(i))) {
-                if (jarFileName.equals(tokens.get(i + 1))) return null;
-                // 공백 포함 파일명은 다시 토큰화될 때 깨지지 않도록 따옴표 처리
-                tokens.set(i + 1, jarFileName.contains(" ")
-                        ? "\"" + jarFileName + "\"" : jarFileName);
-                return String.join(" ", tokens);
             }
         }
         return null;
@@ -1081,6 +1088,8 @@ public class MainController implements Initializable {
         dialog.showAndWait().ifPresent(def -> {
             ctx.getServiceRegistry().add(def);
             ServiceInstance inst = ctx.getProcessManager().getOrCreate(def);
+            // 설치 경로에 JAR을 미리(브라우저 등으로) 넣어 둔 경우 재시작 없이 시작 가능하게
+            syncInstallStatus(inst);
             instanceList.add(inst);
             serviceListView.getSelectionModel().selectLast();
             updateStatusBar();
@@ -1762,6 +1771,8 @@ public class MainController implements Initializable {
                 inst,
                 ctx,
                 () -> {
+                    // 수정으로 설치 경로가 JAR이 있는 폴더로 바뀌었으면 설치됨으로 반영
+                    syncInstallStatus(inst);
                     // 포트·이름 등 정의 변경은 status 리스너에 연결되지 않으므로
                     // 대시보드 가시 여부와 무관하게 항상 카드를 재빌드한다.
                     buildDashboardCards();
