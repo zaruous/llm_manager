@@ -15,7 +15,10 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * 서비스의 설치(git clone + 의존성 설치)와 설치 여부 확인을 담당한다.
@@ -159,6 +162,53 @@ public class InstallationService {
 
         // 실행 파일을 특정할 수 없으면 디렉토리 존재 여부로 fallback
         return true;
+    }
+
+    /**
+     * startCommand가 가리키는 JAR이 설치 경로에 없을 때, 같은 이름으로 시작하는 JAR이
+     * 그 경로에 정확히 하나 있으면 그 파일명을 돌려준다.
+     *
+     * <p>릴리즈 페이지에서 브라우저로 직접 받은 asset은 {@code sql-gen-mcp-1.1.0.jar}처럼
+     * 버전이 붙어 있어 설정의 {@code sql-gen-mcp.jar}와 이름이 다르다. 이 상태로는
+     * {@link #isInstalled}가 false를 돌려주고 시작 명령어도 없는 파일을 가리키므로,
+     * startCommand를 실제 파일명으로 맞출 대상을 여기서 찾는다.
+     * 이름 접두어가 다른 JAR이나 후보가 둘 이상이면 오인 방지를 위해 채택하지 않는다.
+     *
+     * @param def 서비스 정의
+     * @return 채택할 JAR 파일명. 설정된 JAR이 이미 있거나 후보가 없거나 여럿이면 empty
+     */
+    public Optional<String> findAlternateJar(ServiceDefinition def) {
+        String configured = CommandBuilder.jarFileName(def.getStartCommand());
+        if (configured == null || configured.isBlank()) return Optional.empty();
+
+        String baseDir = (def.getWorkingDir() != null && !def.getWorkingDir().isBlank())
+                ? def.getWorkingDir()
+                : def.getInstallDir();
+        if (baseDir == null || baseDir.isBlank()) return Optional.empty();
+
+        Path dir = Path.of(baseDir);
+        if (!Files.isDirectory(dir) || Files.exists(dir.resolve(configured))) return Optional.empty();
+
+        // "sql-gen-mcp-1.1.0.jar" / "sql-gen-mcp.jar" → "sql-gen-mcp" (버전·확장자 제거)
+        String fileOnly = Path.of(configured).getFileName().toString().toLowerCase(Locale.ROOT);
+        String base = fileOnly.replaceFirst("\\.jar$", "").replaceFirst("-\\d.*$", "");
+        if (base.isBlank()) return Optional.empty();
+
+        try (Stream<Path> files = Files.list(dir)) {
+            List<String> candidates = files
+                    .filter(Files::isRegularFile)
+                    .map(f -> f.getFileName().toString())
+                    .filter(n -> {
+                        String lower = n.toLowerCase(Locale.ROOT);
+                        return lower.endsWith(".jar")
+                                && (lower.equals(base + ".jar") || lower.startsWith(base + "-"));
+                    })
+                    .toList();
+            return candidates.size() == 1 ? Optional.of(candidates.get(0)) : Optional.empty();
+        } catch (IOException e) {
+            log.warn("Failed to scan install dir for jar candidates: {}", dir, e);
+            return Optional.empty();
+        }
     }
 
     /**

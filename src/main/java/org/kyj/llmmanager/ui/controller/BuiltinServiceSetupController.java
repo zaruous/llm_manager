@@ -389,7 +389,8 @@ public class BuiltinServiceSetupController {
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     downloadProgress.setProgress(0);
-                    downloadStatusLabel.setText("실패: " + e.getMessage());
+                    // 프록시 차단 등으로 앱에서만 실패하는 경우가 많아 브라우저 직접 다운로드 절차를 안내
+                    downloadStatusLabel.setText(JarDownloader.failureMessage(e, url, targetDir));
                     finishDownload();
                 });
             }
