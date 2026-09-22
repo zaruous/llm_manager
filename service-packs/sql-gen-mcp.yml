@@ -83,6 +83,13 @@ argSpecs:
     description: "[임베딩] 모델 종류 — tei: Text Embeddings Inference (기본), local: ONNX 내장"
     options: [tei, local, ollama, openai, vllm]
     enabled: false
+  - name: embedding.cache.enabled
+    flag: "--ai.vector-store.embedding.cache.enabled="
+    type: SELECT
+    defaultValue: "false"
+    options: [ "false", "true" ]
+    description: "[임베딩] 기동 시 임베딩 캐시 재사용 — 스키마가 그대로인 테이블은 재임베딩을 건너뛴다. 임베딩 모델 교체 시 docs/schema/embedding-cache.json 삭제 필요."
+    enabled: false
   - name: embedding.batch-size
     flag: "--ai.vector-store.embedding.batch-size="
     type: INTEGER
