@@ -610,7 +610,7 @@ public class CursorAgentDialog {
             try {
                 Path target = Path.of(sessionCwd).resolve(sf.getTargetPath());
                 Files.createDirectories(target.getParent());
-                Files.writeString(target, installer.readSkillContent(sf, Map.of()),
+                Files.writeString(target, installer.readSkillContentStrict(sf, Map.of()),
                         java.nio.charset.StandardCharsets.UTF_8);
                 appendLine("설치됨: " + sf.getTargetPath());
             } catch (Exception e) {

@@ -18,6 +18,7 @@ import javafx.stage.DirectoryChooser;
 
 import java.io.File;
 import java.net.URL;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -46,6 +47,9 @@ public class LlmSkillsInstallController implements Initializable {
     /** 팩 ID → 체크박스. 설치 대상 팩을 추적한다. */
     private final Map<String, CheckBox> packChecks = new LinkedHashMap<>();
 
+    /** 팩 목록 영역에 현재 표시 중인 도구 ID. 도구 목록을 다시 그려도 같은 도구를 유지한다. */
+    private String shownToolId;
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         languageCombo.setItems(FXCollections.observableArrayList(
@@ -70,7 +74,16 @@ public class LlmSkillsInstallController implements Initializable {
                 (obs, old, sel) -> { if (sel != null) loadProjectToForm(sel); });
     }
 
+    /**
+     * 도구·팩 체크박스를 다시 만든다. 이미 있던 도구·팩은 직전 체크 상태를 유지하고,
+     * 새로 나타난 도구는 해제, 팩은 선택 상태로 시작한다.
+     * (도구를 기본 선택하면 경로만 넣고 설치를 눌러도 모든 팩이 설치되고, CLAUDE.md처럼
+     * 여러 팩이 같은 파일을 쓰는 충돌이 기본 상태에서 발생한다.)
+     */
     private void loadTools() {
+        Map<String, Boolean> prevTools = selectionOf(toolChecks);
+        Map<String, Boolean> prevPacks = selectionOf(packChecks);
+
         toolsContainer.getChildren().clear();
         toolChecks.clear();
         packChecks.clear();
@@ -81,7 +94,7 @@ public class LlmSkillsInstallController implements Initializable {
         for (LlmTool tool : tools) {
             for (SkillPack pack : tool.getPacks()) {
                 CheckBox cb = new CheckBox();
-                cb.setSelected(true);
+                cb.setSelected(prevPacks.getOrDefault(pack.getId(), true));
                 cb.selectedProperty().addListener((obs, o, v) -> updatePreview());
                 packChecks.put(pack.getId(), cb);
             }
@@ -93,7 +106,7 @@ public class LlmSkillsInstallController implements Initializable {
         int row = 0;
         for (LlmTool tool : tools) {
             CheckBox cb = new CheckBox(tool.getDisplayName());
-            cb.setSelected(true);
+            cb.setSelected(prevTools.getOrDefault(tool.getId(), false));
             cb.setMaxWidth(Double.MAX_VALUE);
             cb.setStyle("-fx-font-size: 13px; -fx-font-weight: bold;");
             Tooltip.install(cb, new Tooltip(tool.getDescription()));
@@ -113,9 +126,23 @@ public class LlmSkillsInstallController implements Initializable {
         toolsContainer.getChildren().add(grid);
         VBox.setVgrow(grid, Priority.ALWAYS);
 
-        if (!tools.isEmpty()) showPacks(tools.get(0));
+        if (!tools.isEmpty()) {
+            showPacks(tools.stream()
+                    .filter(t -> t.getId().equals(shownToolId))
+                    .findFirst().orElse(tools.get(0)));
+        }
     }
 
+    private static Map<String, Boolean> selectionOf(Map<String, CheckBox> checks) {
+        Map<String, Boolean> result = new HashMap<>();
+        checks.forEach((id, cb) -> result.put(id, cb.isSelected()));
+        return result;
+    }
+
+    /**
+     * DB 라이브러리 변경분(로드 탭에서 저장한 파일)을 반영해 도구 목록을 다시 그린다.
+     * 사용자가 고른 체크 상태는 유지된다.
+     */
     public void reloadTools() {
         AppContext.getInstance().getLlmSkillInstaller().refreshLibrary();
         loadTools();
@@ -123,6 +150,7 @@ public class LlmSkillsInstallController implements Initializable {
     }
 
     private void showPacks(LlmTool tool) {
+        shownToolId = tool.getId();
         packsContainer.getChildren().clear();
 
         Label header = new Label(tool.getDisplayName() + " 스킬 팩");
@@ -195,13 +223,19 @@ public class LlmSkillsInstallController implements Initializable {
     }
 
     private void updatePreview() {
-        List<Map<String, String>> items =
-                AppContext.getInstance().getLlmSkillInstaller().preview(buildProjectConfig());
+        LlmSkillInstaller installer = AppContext.getInstance().getLlmSkillInstaller();
+        ProjectConfig config = buildProjectConfig();
+        List<Map<String, String>> items = installer.preview(config);
         if (items.isEmpty()) {
             previewArea.setText("설치할 파일이 없습니다. 도구와 팩을 선택하세요.");
             return;
         }
-        StringBuilder sb = new StringBuilder("설치 예정 파일:\n\n");
+        StringBuilder sb = new StringBuilder();
+        Map<String, List<String>> conflicts = installer.findConflicts(config);
+        if (!conflicts.isEmpty()) {
+            sb.append(formatConflicts(conflicts)).append("\n");
+        }
+        sb.append("설치 예정 파일:\n\n");
         for (Map<String, String> item : items) {
             sb.append(String.format("  %-40s [%s] — %s / %s%n",
                     item.get("target"), item.get("status"),
@@ -234,10 +268,20 @@ public class LlmSkillsInstallController implements Initializable {
         doInstall(true);
     }
 
+    /**
+     * 입력·충돌을 검증하고, 기존 파일을 덮어쓰게 되면 사용자 확인을 받은 뒤 설치한다.
+     *
+     * @param backup true면 확인 없이 기존 파일을 백업하고 덮어쓴다 ('백업 후 설치' 버튼)
+     */
     private void doInstall(boolean backup) {
         String path = projectPathField.getText().trim();
         if (path.isBlank()) {
             alert("프로젝트 경로를 선택하세요.");
+            return;
+        }
+        // 오타 난 경로가 createDirectories로 조용히 생성되는 것을 막는다
+        if (!Files.isDirectory(Path.of(path))) {
+            alert("프로젝트 경로가 존재하지 않거나 디렉토리가 아닙니다:\n" + path);
             return;
         }
 
@@ -245,10 +289,37 @@ public class LlmSkillsInstallController implements Initializable {
         config.setLastInstalled(LocalDateTime.now());
 
         LlmSkillInstaller installer = AppContext.getInstance().getLlmSkillInstaller();
-        try {
-            if (backup) installer.backup(config);
+        List<Map<String, String>> items = installer.preview(config);
+        if (items.isEmpty()) {
+            alert("설치할 파일이 없습니다. 도구와 팩을 선택하세요.");
+            return;
+        }
 
-            LlmSkillInstaller.InstallResult result = installer.install(config, true);
+        Map<String, List<String>> conflicts = installer.findConflicts(config);
+        if (!conflicts.isEmpty()) {
+            alert(formatConflicts(conflicts));
+            return;
+        }
+
+        boolean doBackup = backup;
+        boolean overwrite = true;
+        if (!backup) {
+            List<String> existing = items.stream()
+                    .filter(i -> "덮어쓰기".equals(i.get("status")))
+                    .map(i -> i.get("target"))
+                    .toList();
+            if (!existing.isEmpty()) {
+                InstallMode mode = confirmOverwrite(existing);
+                if (mode == InstallMode.CANCEL) return;
+                doBackup = mode == InstallMode.BACKUP_AND_OVERWRITE;
+                overwrite = mode != InstallMode.NEW_ONLY;
+            }
+        }
+
+        try {
+            if (doBackup) installer.backup(config);
+
+            LlmSkillInstaller.InstallResult result = installer.install(config, overwrite);
 
             StringBuilder msg = new StringBuilder();
             if (!result.installed().isEmpty())
@@ -272,6 +343,51 @@ public class LlmSkillsInstallController implements Initializable {
         } catch (Exception e) {
             alert("설치 오류: " + e.getMessage());
         }
+    }
+
+    /** 기존 파일이 있을 때 사용자가 고른 설치 방식. */
+    private enum InstallMode { OVERWRITE, BACKUP_AND_OVERWRITE, NEW_ONLY, CANCEL }
+
+    /**
+     * 덮어쓸 기존 파일 목록을 보여주고 설치 방식을 묻는다.
+     *
+     * @param existing 이미 존재하는 대상 파일 경로 목록
+     * @return 선택한 설치 방식. 창을 닫으면 CANCEL
+     */
+    private InstallMode confirmOverwrite(List<String> existing) {
+        ButtonType overwriteBtn = new ButtonType("덮어쓰기", ButtonBar.ButtonData.OTHER);
+        ButtonType backupBtn = new ButtonType("백업 후 덮어쓰기", ButtonBar.ButtonData.OK_DONE);
+        ButtonType newOnlyBtn = new ButtonType("신규 파일만 설치", ButtonBar.ButtonData.OTHER);
+        ButtonType cancelBtn = new ButtonType("취소", ButtonBar.ButtonData.CANCEL_CLOSE);
+
+        TextArea list = new TextArea(existing.stream()
+                .map(s -> "  " + s).collect(Collectors.joining("\n")));
+        list.setEditable(false);
+        list.setPrefRowCount(Math.min(existing.size(), 10));
+
+        Alert dialog = new Alert(Alert.AlertType.CONFIRMATION, null,
+                overwriteBtn, backupBtn, newOnlyBtn, cancelBtn);
+        dialog.initOwner(installBtn.getScene().getWindow());
+        dialog.setTitle("기존 파일 덮어쓰기");
+        dialog.setHeaderText("프로젝트에 이미 있는 파일 " + existing.size() + "개를 덮어씁니다.");
+        dialog.getDialogPane().setContent(new VBox(8,
+                new Label("'신규 파일만 설치'는 기존 파일을 그대로 두고 없는 파일만 만듭니다."), list));
+
+        ButtonType choice = dialog.showAndWait().orElse(cancelBtn);
+        if (choice == overwriteBtn) return InstallMode.OVERWRITE;
+        if (choice == backupBtn) return InstallMode.BACKUP_AND_OVERWRITE;
+        if (choice == newOnlyBtn) return InstallMode.NEW_ONLY;
+        return InstallMode.CANCEL;
+    }
+
+    private static String formatConflicts(Map<String, List<String>> conflicts) {
+        StringBuilder sb = new StringBuilder(
+                "⚠ 같은 경로에 설치되는 팩이 있습니다. 경로마다 하나의 팩만 선택하세요.\n");
+        conflicts.forEach((target, owners) -> {
+            sb.append("\n  ").append(target).append('\n');
+            owners.forEach(o -> sb.append("    - ").append(o).append('\n'));
+        });
+        return sb.toString();
     }
 
     @FXML
@@ -342,6 +458,8 @@ public class LlmSkillsInstallController implements Initializable {
     }
 
     private void alert(String msg) {
-        new Alert(Alert.AlertType.INFORMATION, msg, ButtonType.OK).showAndWait();
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, msg, ButtonType.OK);
+        alert.initOwner(installBtn.getScene().getWindow());
+        alert.showAndWait();
     }
 }

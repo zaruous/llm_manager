@@ -7,6 +7,7 @@ package org.kyj.llmmanager.ui.controller;
 import org.kyj.llmmanager.AppContext;
 import org.kyj.llmmanager.model.LoadFileEntry;
 import org.kyj.llmmanager.service.LlmSkillInstaller;
+import org.kyj.llmmanager.service.SkillRuleFileScanner;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.*;
@@ -89,7 +90,7 @@ public class LlmSkillsLoadController implements Initializable {
 
     /**
      * 소스 디렉토리를 재귀 탐색해 파일 목록을 갱신한다.
-     * .git, node_modules 등 노이즈 디렉토리는 제외한다.
+     * 제외 규칙은 {@link SkillRuleFileScanner} 참고.
      */
     @FXML
     private void onScan() {
@@ -110,13 +111,8 @@ public class LlmSkillsLoadController implements Initializable {
         previewArea.clear();
 
         try {
-            List<LoadFileEntry> found = Files.walk(sourceRoot)
-                    .filter(Files::isRegularFile)
-                    .filter(p -> !isExcluded(p))
-                    .filter(LlmSkillsLoadController::isSkillRuleFile)
-                    .sorted()
-                    .map(p -> new LoadFileEntry(
-                            sourceRoot.relativize(p).toString().replace('\\', '/')))
+            List<LoadFileEntry> found = SkillRuleFileScanner.scan(sourceRoot).stream()
+                    .map(LoadFileEntry::new)
                     .collect(Collectors.toList());
 
             fileEntries.addAll(found);
@@ -129,47 +125,6 @@ public class LlmSkillsLoadController implements Initializable {
         } catch (IOException e) {
             alert("스캔 오류: " + e.getMessage());
         }
-    }
-
-    /**
-     * 재귀 탐색 시 제외할 경로 판별.
-     * 경로 구성 요소 중 하나라도 노이즈 디렉토리명과 일치하면 true를 반환한다.
-     *
-     * @param path 판별 대상 파일 경로
-     * @return 제외 대상이면 true
-     */
-    private boolean isExcluded(Path path) {
-        for (Path part : path) {
-            String name = part.toString();
-            if (name.equals(".git") || name.equals("node_modules") ||
-                name.equals("target") || name.equals("build") ||
-                name.equals(".gradle") || name.equals(".idea") ||
-                name.startsWith(".llm-backup")) {
-                return true;
-            }
-        }
-        String fileName = path.getFileName().toString().toLowerCase();
-        if (fileName.equals(".env") || fileName.endsWith(".key") ||
-            fileName.endsWith(".pem") || fileName.contains("token") ||
-            fileName.contains("pat")) {
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * LLM 스킬·룰 파일로 인식할 확장자 판별.
-     * 텍스트 기반 설정 파일만 포함하며 바이너리·소스 코드는 제외한다.
-     *
-     * @param path 판별 대상 파일 경로
-     * @return 스킬·룰 파일이면 true
-     */
-    private static boolean isSkillRuleFile(Path path) {
-        String name = path.getFileName().toString().toLowerCase();
-        return name.endsWith(".md")   || name.endsWith(".mdc")  ||
-               name.endsWith(".json") || name.endsWith(".yaml") ||
-               name.endsWith(".yml")  || name.endsWith(".txt")  ||
-               name.endsWith(".toml") || name.endsWith(".xml");
     }
 
     @FXML

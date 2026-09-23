@@ -15,7 +15,7 @@ JavaFX 기반 LLM 서비스 관리 데스크톱 앱.
 |------|------|
 | `src/main/java/org/kyj/llmmanager/` | Java 소스 루트 |
 | `src/main/resources/org/kyj/llmmanager/` | FXML / CSS / 도움말 리소스 |
-| `src/main/resources/llm-skills/` | Claude/Copilot/Cursor/Gemini/Wiki-Agent 스킬 팩 리소스 |
+| `src/main/resources/llm-skills/` | Claude/Cursor/Wiki-Agent 스킬 팩 리소스 (`tools.json`) |
 | `plugins/wiki-agent/` | LLM Wiki Agent 플러그인 (manifest + 업스트림 Python 도구) |
 | `service-packs/` | 기본 제공 서비스 YAML (배포 포함). `ServicePackLoader`가 로드 |
 | `bin/` | 배포·설치 PowerShell 스크립트 |
@@ -120,12 +120,12 @@ LLMManager/
 | 기능 영역 | 주요 클래스·파일 | 비고 |
 |-----------|-----------------|------|
 | 서비스 관리 | `ServicePackLoader`, `ServiceRegistry`, `ServiceRunner` | `service-packs/*.yml` 기반 등록·시작·중지·로그 |
-| 스킬 팩 설치 | `SkillPackInstaller`, `tools.json` | Claude/Copilot/Cursor/Gemini/Wiki-Agent |
+| 스킬 팩 설치 | `LlmSkillInstaller`, `LlmSkillsInstallController`, `tools.json` | cursor/claude/wiki-agent 3개 도구 (Gemini·Codex는 wiki-agent 팩) |
 | 플러그인 시스템 | `PluginManager`, `PluginCommandExecutor` | `plugins/` 디렉토리 declarative 플러그인, Cursor 에이전트 러너 |
 | LLM Wiki Agent | `plugins/wiki-agent/`, `WikiWorkspaceInitializer` | ingest/query/browse/health; 서비스별 워크스페이스(`argValues`) |
 | Wiki 벡터 색인 | `WikiIndexService`, `WikiVectorRepository`, `WikiPreprocessor`, `WikiChunker` | sqlite-vec 색인; body_hash 기반 임베딩 재연결(아래) |
 | 시스템 모니터 | `SystemMonitorService` | 관리 메모리(RSS) 게이지, 2초 주기 갱신 |
-| 스킬 라이브러리 | `LlmSkillLibraryRepository` | HikariCP + SQLite; UI "로드" 탭은 파일 복사 (DB 미연결) |
+| 스킬 라이브러리 | `LlmSkillLibraryRepository`, `SkillRuleFileScanner` | HikariCP + SQLite 등; "로드" 탭이 스캔한 파일을 `skill_files`에 저장하고 설치 탭에 "로드된 Cursor 라이브러리" 도구로 노출 |
 
 - `service-packs/`: `bgem3-embedding.yml`(CUDA 자동 감지), `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`
 - `chroma-db.yml`: ChromaDB 벡터 DB 템플릿 — 기본 포트 18000 (swagger-mcp·sql-gen-mcp의 chroma.url 기본값과 일치), `pip install chromadb` 자동 설치, 헬스체크 `/api/v2/heartbeat`
@@ -169,6 +169,27 @@ LLMManager/
   (`sql-gen-mcp-1.1.0.jar`)이 설치 경로에 정확히 하나면 `InstallationService.findAlternateJar()`로 찾아
   startCommand를 갱신·저장한다 (후보 0개·2개 이상·접두어 불일치면 손대지 않음). 갱신은 서비스 로그에 남긴다.
 - `withJarFileName`은 `CommandBuilder`로 이동 (`jarFileName` 추가).
+
+### LLM 스킬 & 룰 설치 팝업 안전성 수정 (2026-09-24)
+
+- **덮어쓰기 확인**: 설치 버튼이 `install(config, true)` 고정이라 기존 CLAUDE.md 등을 확인 없이 덮어썼다.
+  이제 기존 파일이 있으면 목록을 보여주고 덮어쓰기 / 백업 후 덮어쓰기(기본) / 신규 파일만 설치 / 취소를 묻는다.
+  '백업 후 설치' 버튼은 그대로 확인 없이 백업 후 덮어쓴다. 존재하지 않는 프로젝트 경로는 거부한다.
+- **도구 기본 선택 해제**: 모든 도구·팩이 기본 선택이라 경로만 넣고 누르면 전부 설치됐다. 도구는 해제, 팩은
+  선택 상태로 시작한다 (도구를 켜면 그 도구의 팩 전체가 기본 대상).
+- **대상 경로 충돌 차단**: `claude-base`와 `wiki-agent/wiki-claude`가 둘 다 `CLAUDE.md`에 쓴다.
+  `LlmSkillInstaller.findConflicts()`가 대소문자 무시(Windows·macOS)로 겹치는 대상을 찾아 미리보기에 경고하고
+  설치를 막는다. `install()` 자체도 한 번의 설치에서 같은 대상은 첫 파일만 쓰고 나머지는 오류로 보고한다.
+- **탭 전환 시 선택 유지**: 설치 탭으로 돌아올 때마다 `reloadTools()`가 체크박스를 전부 선택 상태로 재생성했다.
+  이제 직전 체크 상태와 표시 중인 도구를 보존한다.
+- **읽기 실패 문구가 파일에 기록되던 문제**: `readSkillContent()`는 실패 시 안내 문자열을 반환해, 설치와
+  CursorAgentDialog `/skill`이 그 문구를 파일 내용으로 썼다. 파일 쓰기는 예외를 던지는 `readSkillContentStrict()`를 쓴다.
+- **로드 탭 스캔 필터**: `SkillRuleFileScanner`로 분리. 제외 판정을 소스 루트 기준 상대 경로에만 적용하고
+  (이전: 소스 루트가 `build/` 아래면 0개), 제외 디렉토리는 `SKIP_SUBTREE`로 들어가지 않는다. 비밀 파일 판정은
+  파일명 단어 단위 비교 — `contains("pat")`가 `pattern.md`·`compatibility.md`까지 제외하던 오탐 수정.
+- 남은 과제: `skill_files.relative_path` UNIQUE라 다른 소스 루트의 같은 상대 경로가 서로 덮어쓴다. `.cursor`
+  디렉토리 자체를 스캔하면 `.cursor/` 접두어 없이 저장돼 프로젝트 루트에 설치된다. 설치 I/O가 FX 스레드에서 돈다.
+- 검증: `LlmSkillInstallerTest`(실제 tools.json 기준 충돌·덮어쓰기·경로 미지정), `SkillRuleFileScannerTest`.
 
 ### 자동 업데이트 실패 수정 (2026-09-14, v1.2.1+)
 
