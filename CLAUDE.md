@@ -127,7 +127,11 @@ LLMManager/
 | 시스템 모니터 | `SystemMonitorService` | 관리 메모리(RSS) 게이지, 2초 주기 갱신 |
 | 스킬 라이브러리 | `LlmSkillLibraryRepository`, `SkillRuleFileScanner` | HikariCP + SQLite 등; "로드" 탭이 스캔한 파일을 `skill_files`에 저장하고 설치 탭에 "로드된 Cursor 라이브러리" 도구로 노출 |
 
-- `service-packs/`: `bgem3-embedding.yml`(CUDA 자동 감지), `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`
+- `service-packs/`: `bgem3-embedding.yml`(CUDA 자동 감지), `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`, `simple-mcp.yml`
+- `simple-mcp.yml` + `plugins/simple-mcp/server.py`: 임베딩 없이 PostgreSQL을 조회만 하는 경량 MCP 서버 (fastmcp + psycopg).
+  도구 `list_tables`·`describe_table`·`run_query`(SELECT 등 한 문장, 행 수 상한). 읽기 전용은 첫 키워드 검사 +
+  psycopg `read_only` 세션 이중 보장 — 단 `pg_terminate_backend` 같은 관리 함수는 DB 권한이 최종 경계이므로 읽기 전용 롤 권장.
+  `db-url`은 sql-gen-mcp와 같은 `jdbc:postgresql://…` 형식을 그대로 받는다(접두어 제거). 기본 포트 7071.
 - `chroma-db.yml`: ChromaDB 벡터 DB 템플릿 — 기본 포트 18000 (swagger-mcp·sql-gen-mcp의 chroma.url 기본값과 일치), `pip install chromadb` 자동 설치, 헬스체크 `/api/v2/heartbeat`
 - 임베딩 재연결(body_hash): `chunks.body_hash` 컬럼(자동 마이그레이션+백필). 변경 감지를
   content_hash(헤더 포함)와 body_hash(본문만)로 이원화 — 헤더 포맷·경로 변경, 문단 삽입/재배열은
