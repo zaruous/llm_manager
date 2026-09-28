@@ -148,8 +148,8 @@ public class LogService {
     }
 
     private void trimBeforeAdd(ServiceInstance instance, int incomingSize) {
-        if (instance.getLogs().size() + incomingSize <= 5000) return;
-        int removeCount = Math.min(1000, instance.getLogs().size());
+        if (instance.getLogs().size() + incomingSize <= ServiceInstance.MAX_LOG_LINES) return;
+        int removeCount = Math.min(ServiceInstance.LOG_TRIM_LINES, instance.getLogs().size());
         if (removeCount > 0) {
             instance.getLogs().remove(0, removeCount);
         }
