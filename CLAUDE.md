@@ -127,7 +127,11 @@ LLMManager/
 | 시스템 모니터 | `SystemMonitorService` | 관리 메모리(RSS) 게이지, 2초 주기 갱신 |
 | 스킬 라이브러리 | `LlmSkillLibraryRepository`, `SkillRuleFileScanner` | HikariCP + SQLite 등; "로드" 탭이 스캔한 파일을 `skill_files`에 저장하고 설치 탭에 "로드된 Cursor 라이브러리" 도구로 노출 |
 
-- `service-packs/`: `bgem3-embedding.yml`(CUDA 자동 감지), `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`
+- `service-packs/`: `bgem3-embedding.yml`(CUDA 자동 감지), `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`, `simple-mcp.yml`
+- `simple-mcp.yml` + `plugins/simple-mcp/server.py`: 임베딩 없이 PostgreSQL을 조회만 하는 경량 MCP 서버 (fastmcp + psycopg).
+  도구 `list_tables`·`describe_table`·`run_query`(SELECT 등 한 문장, 행 수 상한)·`explain_query`(EXPLAIN FORMAT JSON, analyze 기본 off). 읽기 전용은 첫 키워드 검사 +
+  psycopg `read_only` 세션 이중 보장 — 단 `pg_terminate_backend` 같은 관리 함수는 DB 권한이 최종 경계이므로 읽기 전용 롤 권장.
+  `db-url`은 sql-gen-mcp와 같은 `jdbc:postgresql://…` 형식을 그대로 받는다(접두어 제거). 기본 포트 7071.
 - `chroma-db.yml`: ChromaDB 벡터 DB 템플릿 — 기본 포트 18000 (swagger-mcp·sql-gen-mcp의 chroma.url 기본값과 일치), `pip install chromadb` 자동 설치, 헬스체크 `/api/v2/heartbeat`
 - 임베딩 재연결(body_hash): `chunks.body_hash` 컬럼(자동 마이그레이션+백필). 변경 감지를
   content_hash(헤더 포함)와 body_hash(본문만)로 이원화 — 헤더 포맷·경로 변경, 문단 삽입/재배열은
@@ -139,6 +143,19 @@ LLMManager/
   본문이 바뀌는 다음 편집에서 자연 갱신.
 
 **배포 주의사항**: jpackage는 번들 JRE에서 `java.exe`를 제거한다. `build.gradle`의 `copyJavaExeToRuntime()`이 빌드 JDK에서 `runtime/bin/`으로 복사한다. WebView 사용 시 `--add-opens javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED`이 applicationDefaultJvmArgs·startScripts·jpackage 세 곳에 모두 필요하다. 같은 세 곳에 `-Djava.net.useSystemProxies=true`도 필요하다 — 없으면 앱의 HttpClient가 Windows 프록시 설정을 무시하고 직접 연결해, 사내망에서 JAR 다운로드·릴리즈 조회가 `Permission denied: getsockopt`로 실패한다 (v1.2.5).
+
+### 로그 탭 되감기 응답 없음 수정 (2026-09-28)
+
+- **원인**: 서비스 선택 시 `refreshLogs()`가 버퍼(최대 5000건)를 한 줄씩 `TextArea.appendText()`로
+  되감았다. appendText는 호출마다 레이아웃 비용이 누적 텍스트 길이에 비례해 O(n²) — Xvfb 실측
+  5000줄 되감기 26.5초(한 줄씩) vs 19ms(한 번에), 5000줄 위에 실시간 200줄 2.1초 vs 12ms.
+  sql-gen-mcp처럼 로그가 많은 서비스를 클릭할 때만 "응답 없음"이 나던 이유.
+- `LogTextUtil.render()`로 문자열을 합쳐 되감기·실시간 묶음(LogService 100ms 단위) 모두 appendText 1회.
+  잘라내기는 묶음 뒤 `MAX - TRIM`(4000)행으로 맞춘다. JavaFX 의존 없는 순수 유틸이라 툴킷 없이 테스트.
+- **지우기가 버퍼까지 비움**: 이전엔 TextArea만 비워 다시 선택하면 전부 되돌아왔다. 파일 로그가 없어 복구 불가.
+- **5000/1000 상수 통합**: `ServiceInstance.MAX_LOG_LINES`·`LOG_TRIM_LINES` 하나로 `ServiceInstance.addLog`,
+  `LogService.trimBeforeAdd`, `MainController.appendLogEntries` 세 곳이 같은 값을 쓴다. 설정 항목은 아니다.
+- 검증: `LogTextUtilTest`, `DownloadButtonFxmlTest`(xvfb). `refreshInstall()`의 파일 검사(FX 스레드)는 그대로.
 
 ### sql-gen-mcp 중복 등록·JAR 버전 인식 버그 수정 (2026-08-11)
 

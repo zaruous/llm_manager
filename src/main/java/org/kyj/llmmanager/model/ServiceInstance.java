@@ -23,6 +23,14 @@ import java.util.List;
  */
 public class ServiceInstance {
 
+    /**
+     * 인스턴스 로그 버퍼와 로그 탭 표시 행 수의 공통 상한.
+     * LogService·MainController가 같은 값을 써야 버퍼와 화면의 줄 수가 어긋나지 않는다.
+     */
+    public static final int MAX_LOG_LINES = 5000;
+    /** 상한 초과 시 한 번에 앞에서 제거하는 줄 수. 매 줄마다 지우지 않고 묶어서 비용을 줄인다. */
+    public static final int LOG_TRIM_LINES = 1000;
+
     /** 이 인스턴스의 서비스 정의. 수정 다이얼로그 저장 시 updateDefinition()으로 교체 가능. */
     private ServiceDefinition definition;
 
@@ -131,12 +139,12 @@ public class ServiceInstance {
 
     /**
      * 로그를 추가한다.
-     * 5000줄 초과 시 앞 1000줄을 제거해 메모리 과다 사용을 방지한다.
+     * MAX_LOG_LINES 초과 시 앞 LOG_TRIM_LINES줄을 제거해 메모리 과다 사용을 방지한다.
      *
      * @param entry 추가할 로그 항목
      */
     public void addLog(LogEntry entry) {
-        if (logs.size() > 5000) logs.remove(0, 1000);
+        if (logs.size() > MAX_LOG_LINES) logs.remove(0, LOG_TRIM_LINES);
         logs.add(entry);
     }
 }

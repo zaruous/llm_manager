@@ -16,6 +16,7 @@ import org.kyj.llmmanager.util.PlatformUtil;
 import org.kyj.llmmanager.ui.cell.ServiceListCell;
 import org.kyj.llmmanager.ui.dialog.ServiceDetailDialog;
 import org.kyj.llmmanager.util.CommandBuilder;
+import org.kyj.llmmanager.util.LogTextUtil;
 import org.kyj.llmmanager.util.SceneFactory;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -203,7 +204,7 @@ public class MainController implements Initializable {
     private final Map<String, Control> argControls = new HashMap<>();
     /** 1초 간격으로 업타임 레이블을 갱신하는 스케줄러 */
     private ScheduledExecutorService uptimeScheduler;
-    /** 로그 탭 TextArea에 현재 표시 중인 행 수. 5000행 초과 시 앞 1000행을 제거한다. */
+    /** 로그 탭 TextArea에 현재 표시 중인 행 수. MAX_LOG_LINES 초과 시 앞 LOG_TRIM_LINES행을 제거한다. */
     private int logLineCount = 0;
     /** 서비스 선택 시 콤보 값을 맞추는 동안 저장 이벤트를 막는다. */
     private boolean updatingLogEncoding = false;
@@ -458,14 +459,13 @@ public class MainController implements Initializable {
         if (selectedInstance == null) return;
         logArea.clear();
         logLineCount = 0;
-        for (LogEntry entry : selectedInstance.getLogs()) {
-            appendLogEntry(entry);
-        }
+        appendLogEntries(selectedInstance.getLogs());
 
+        // LogService가 100ms마다 최대 1000건씩 넘기므로 묶음 그대로 한 번에 붙인다
         logListener = change -> {
             while (change.next()) {
                 if (change.wasAdded()) {
-                    change.getAddedSubList().forEach(this::appendLogEntry);
+                    appendLogEntries(change.getAddedSubList());
                 }
             }
         };
@@ -484,24 +484,24 @@ public class MainController implements Initializable {
         }
     }
 
-    private void appendLogEntry(LogEntry entry) {
-        String filter = filterField.getText();
-        if (filter != null && !filter.isBlank()
-                && !entry.getMessage().contains(filter)) return;
-        logArea.appendText("[" + entry.getTimeString() + "] " + entry.getMessage() + "\n");
-        logLineCount++;
+    /**
+     * 로그 항목 묶음을 필터를 적용해 문자열 하나로 합친 뒤 TextArea에 한 번만 붙인다.
+     * appendText()는 호출마다 레이아웃 비용이 텍스트 길이에 비례하므로 한 줄씩 붙이면
+     * 5000줄 되감기에 수 초가 걸려 서비스 선택 시 창이 "응답 없음"이 된다.
+     *
+     * @param entries 붙일 로그 항목들 (되감기 전체 또는 실시간 묶음)
+     */
+    private void appendLogEntries(List<? extends LogEntry> entries) {
+        LogTextUtil.Rendered rendered = LogTextUtil.render(entries, filterField.getText());
+        if (rendered.lines() == 0) return;
+        logArea.appendText(rendered.text());
+        logLineCount += rendered.lines();
 
-        // 5000행 초과 시 앞 1000행 제거 — TextArea 메모리 과다 사용 방지
-        if (logLineCount > 5000) {
-            String text = logArea.getText();
-            int idx = 0;
-            for (int i = 0; i < 1000; i++) {
-                int next = text.indexOf('\n', idx);
-                if (next == -1) { idx = text.length(); break; }
-                idx = next + 1;
-            }
-            logArea.setText(text.substring(idx));
-            logLineCount -= 1000;
+        // 상한 초과 시 앞부분을 잘라 MAX - TRIM 행으로 맞춘다 — TextArea 메모리 과다 사용 방지
+        if (logLineCount > ServiceInstance.MAX_LOG_LINES) {
+            int drop = logLineCount - (ServiceInstance.MAX_LOG_LINES - ServiceInstance.LOG_TRIM_LINES);
+            logArea.setText(LogTextUtil.dropLeadingLines(logArea.getText(), drop));
+            logLineCount -= drop;
         }
 
         if (autoScrollCheck.isSelected()) {
@@ -509,17 +509,23 @@ public class MainController implements Initializable {
         }
     }
 
+    /**
+     * 로그 탭을 비운다. 화면만 지우면 서비스를 다시 선택할 때 인스턴스 버퍼가 그대로
+     * 되감기므로 버퍼도 함께 비운다 — 파일 로그가 없어 지운 로그는 복구할 수 없다.
+     */
     @FXML
     private void onClear() {
         logArea.clear();
         logLineCount = 0;
+        if (selectedInstance != null) selectedInstance.getLogs().clear();
     }
 
     @FXML
     private void onFilter() {
         if (selectedInstance == null) return;
         logArea.clear();
-        selectedInstance.getLogs().forEach(this::appendLogEntry);
+        logLineCount = 0;
+        appendLogEntries(selectedInstance.getLogs());
     }
 
     @FXML
