@@ -272,6 +272,41 @@ def run_query(sql: str, max_rows: int = 0) -> str:
         return _dump({"error": str(e)})
 
 
+def build_explain_sql(sql_text: str, analyze: bool) -> str:
+    """explain_query용 EXPLAIN 문을 조립한다. 안쪽 SQL은 run_query와 같은 읽기 전용 검사를 거친다.
+
+    EXPLAIN을 직접 붙여 보내면 이중 EXPLAIN이 되므로 거부한다. 실행 계획을 구하려는
+    문장이 SELECT가 아니어도(예: DELETE) 계획 자체는 무해하지만, ANALYZE가 붙으면 실제로
+    실행되므로 처음부터 읽기 전용 문장만 받는다.
+    """
+    cleaned = validate_read_only(sql_text)
+    if re.match(r"EXPLAIN\b", cleaned, re.IGNORECASE):
+        raise ValueError("EXPLAIN 없이 분석할 SQL만 넣어 주세요. 서버가 EXPLAIN을 붙입니다.")
+    options = "FORMAT JSON, ANALYZE" if analyze else "FORMAT JSON"
+    return f"EXPLAIN ({options}) {cleaned}"
+
+
+@mcp.tool()
+def explain_query(sql: str, analyze: bool = False) -> str:
+    """읽기 전용 SQL 한 문장의 실행 계획(EXPLAIN FORMAT JSON)을 돌려준다. SQL을 실행하지 않는다.
+
+    Args:
+        sql: 분석할 SQL (EXPLAIN 없이). SELECT/WITH/VALUES/TABLE로 시작하는 한 문장만 허용.
+        analyze: true면 EXPLAIN ANALYZE — 실제로 실행해 실측 시간·행 수를 포함한다.
+            읽기 전용 세션이라 데이터 변경은 불가하지만 무거운 쿼리는 그대로 수행되므로 기본 false.
+    """
+    try:
+        explain_sql = build_explain_sql(sql, analyze)
+        with _connect() as conn:
+            _set_search_path(conn, _resolve_schema(""))
+            row = conn.execute(explain_sql).fetchone()
+        # FORMAT JSON은 json 타입 1행 1열로 오고 psycopg가 이미 list/dict로 변환해 준다
+        plan = row[0] if row else None
+        return _dump({"analyze": analyze, "plan": plan})
+    except Exception as e:
+        return _dump({"error": str(e)})
+
+
 # ─────────────────────────────────────────────────────────────
 # 서버 시작
 # ─────────────────────────────────────────────────────────────

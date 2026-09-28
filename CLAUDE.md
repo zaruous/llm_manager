@@ -129,7 +129,7 @@ LLMManager/
 
 - `service-packs/`: `bgem3-embedding.yml`(CUDA 자동 감지), `chroma-db.yml`, `sql-gen-mcp.yml`, `swagger-mcp.yml`, `wiki-mcp.yml`, `simple-mcp.yml`
 - `simple-mcp.yml` + `plugins/simple-mcp/server.py`: 임베딩 없이 PostgreSQL을 조회만 하는 경량 MCP 서버 (fastmcp + psycopg).
-  도구 `list_tables`·`describe_table`·`run_query`(SELECT 등 한 문장, 행 수 상한). 읽기 전용은 첫 키워드 검사 +
+  도구 `list_tables`·`describe_table`·`run_query`(SELECT 등 한 문장, 행 수 상한)·`explain_query`(EXPLAIN FORMAT JSON, analyze 기본 off). 읽기 전용은 첫 키워드 검사 +
   psycopg `read_only` 세션 이중 보장 — 단 `pg_terminate_backend` 같은 관리 함수는 DB 권한이 최종 경계이므로 읽기 전용 롤 권장.
   `db-url`은 sql-gen-mcp와 같은 `jdbc:postgresql://…` 형식을 그대로 받는다(접두어 제거). 기본 포트 7071.
 - `chroma-db.yml`: ChromaDB 벡터 DB 템플릿 — 기본 포트 18000 (swagger-mcp·sql-gen-mcp의 chroma.url 기본값과 일치), `pip install chromadb` 자동 설치, 헬스체크 `/api/v2/heartbeat`

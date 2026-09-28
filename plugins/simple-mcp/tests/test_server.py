@@ -54,6 +54,27 @@ class TestValidateReadOnly(unittest.TestCase):
             server.validate_read_only("/* SELECT */ UPDATE t SET a = 1")
 
 
+class TestBuildExplainSql(unittest.TestCase):
+
+    def test_wraps_select_with_explain_json(self):
+        self.assertEqual("EXPLAIN (FORMAT JSON) SELECT * FROM t",
+                         server.build_explain_sql("SELECT * FROM t;", analyze=False))
+
+    def test_analyze_option(self):
+        self.assertEqual("EXPLAIN (FORMAT JSON, ANALYZE) SELECT 1",
+                         server.build_explain_sql("SELECT 1", analyze=True))
+
+    def test_rejects_write_and_multi_statement_before_explain(self):
+        # 레거시 sql-gen-mcp explain_query는 검증 없이 EXPLAIN 뒤에 문자열을 붙였다 — 여기서는 먼저 거른다
+        for stmt in ("DELETE FROM t", "SELECT 1; DELETE FROM t", "UPDATE t SET a = 1"):
+            with self.assertRaises(ValueError, msg=stmt):
+                server.build_explain_sql(stmt, analyze=True)
+
+    def test_rejects_nested_explain(self):
+        with self.assertRaises(ValueError):
+            server.build_explain_sql("EXPLAIN SELECT 1", analyze=False)
+
+
 class TestNormalizeDbUrl(unittest.TestCase):
 
     def test_strips_jdbc_prefix(self):
